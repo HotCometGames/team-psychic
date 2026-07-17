@@ -43,6 +43,7 @@ import tkinter as tk
 from os.path import abspath, dirname, join
 from typing import Any
 
+
 import numpy as np
 from PIL import Image, ImageTk
 
@@ -66,6 +67,7 @@ from ui.capacity_meter import CapacityMeter
 from ui.clock import Clock
 from ui.digital_clock import DigitalClock
 from ui.game_viewer import GameViewer
+from ui.horde_meter import HordeMeter
 
 # Feature flag: swap clock implementations by changing LEGACY_CLOCK in gameplay/constants.py.
 # This is a teaching example of the feature-flag pattern — see constants.py for details.
@@ -272,6 +274,15 @@ class UI:
 
         # --- Ambulance capacity meter ---
         self.capacity_meter = CapacityMeter(self.root, w, h, AMBULANCE_CAPACITY)
+        
+        # --- Horde distance meter ---
+        self.horde_meter = HordeMeter(
+            self.root, w, h,
+            max_distance=100,
+            initial_distance=10,
+            zombie_img_path=join(dirname(abspath(__file__)), "graphics", "zombie.png"),
+            ambulance_img_path=join(dirname(abspath(__file__)), "graphics", "ambulance.png"),
+        )
 
         # --- Value display ---
         self.value_label = tk.Label(
@@ -439,7 +450,10 @@ class UI:
         hour, minute = self._time_to_clock_hands(scorekeeper.remaining_time)
         self.clock.update_time(hour, minute)
         self.capacity_meter.update_fill(max(0, scorekeeper.get_current_capacity()))
-
+        self.horde_meter.update_distance(scorekeeper.horde_distance)
+        
+        self.horde_meter.update_distance(50)  # Placeholder. This ensures the horde meter always shows a fixed distance for now
+        
     def _update_info_display(self, scorekeeper: ScoreKeeper) -> None:
         """Refresh the classifier/recommender output label for the current humanoid.
 
