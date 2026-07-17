@@ -18,7 +18,9 @@ class GameViewer:
     """
 
     canvas: tk.Canvas
-    photo: Any | None  # ImageTk.PhotoImage | None
+    photo: list[Any] | None  # ImageTk.PhotoImage | None
+    current_paths: list[str] # Add an attribute to remember current paths
+    on_image_selected: Any
 
     def __init__(self, root: Any, w: int, h: int, data_fp: str, humanoid: Any) -> None:
         """Create the game viewer canvas and display the first humanoid.
@@ -42,6 +44,10 @@ class GameViewer:
         self.canvas.update()
 
         self.photo = None
+        self.current_paths = []
+        self.on_image_selected = None
+
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
         self.create_photo(join(data_fp, humanoid.fp))
 
     def delete_photo(self, event: Any = None) -> None:
@@ -52,6 +58,46 @@ class GameViewer:
                 ``None`` when called directly.
         """
         self.canvas.delete("photo")
+        self.photos = []
+
+    def create_photos(self, file_paths: list[str]) -> None:
+        """Load a list of images from disk and display them side-by-side.
+
+        Replaces any existing photos. Automatically divides the canvas width 
+        equally among all images provided.
+        """
+        self.canvas.delete("photo")
+        self.photos = []
+        
+        num_images = len(file_paths)
+        if num_images == 0:
+            return
+
+        # Calculate layout constraints
+        canvas_w = self.canvas.winfo_width()
+        canvas_h = self.canvas.winfo_height()
+        target_w = math.floor(canvas_w / num_images)
+
+        target_w = math.floor(canvas_w / num_images)
+        
+        for i, fp in enumerate(file_paths):
+            # Calculate the horizontal offset for each image
+            x_offset = i * target_w
+            
+            # Load and resize image to fit its fractional slice
+            photo = self._get_photo(fp, target_w, canvas_h)
+            self.photos.append(photo)
+            
+            img_h = photo.height()
+            y_offset = max(0, math.floor((canvas_h - img_h) / 2))
+
+            # Place onto the canvas canvas 
+            self.canvas.create_image(
+                x_offset, y_offset,  
+                anchor=tk.NW, 
+                image=photo, 
+                tags=("photo", f"idx_{i}")
+            )
 
     def create_photo(self, fp: str) -> None:
         """Load an image from disk and display it on the canvas.
@@ -62,12 +108,23 @@ class GameViewer:
         Args:
             fp: Path to the image file.
         """
-        self.canvas.delete("photo")
-        self.photo = self._get_photo(
-            fp, self.canvas.winfo_width(), self.canvas.winfo_height()
-        )
-        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo, tags="photo")
+        self.create_photos([fp])
 
+    def _on_canvas_click(self, event: Any) -> None:
+        """Determines which image slice was clicked based on its X coordinate."""
+        num_images = len(self.current_paths)
+        if num_images <= 1 or not self.on_image_selected:
+            return # No choice needed if there's only 1 image on screen
+
+        canvas_w = self.canvas.winfo_width()
+        slice_w = canvas_w / num_images
+        
+        # Calculate index based on click position
+        clicked_idx = int(event.x // slice_w)
+        if 0 <= clicked_idx < num_images:
+            # Fire the UI callback passing back the chosen humanoid index
+            self.on_image_selected(clicked_idx)
+        
     def display_score(
         self, score: dict[str, int | float], end_reason: str = ""
     ) -> None:
@@ -118,7 +175,7 @@ class GameViewer:
         ).pack(anchor=tk.NW)
 
     @staticmethod
-    def _get_photo(img_path: str, w: int, h: int) -> Any:
+    def _get_photo(img_path: str, max_w: int, max_h: int) -> Any:
         """Load, resize, and return a Tkinter-compatible photo image.
 
         Args:
@@ -130,7 +187,17 @@ class GameViewer:
             An :class:`~PIL.ImageTk.PhotoImage` resized to ``(w, h)``.
         """
         with Image.open(img_path) as img:
-            # Convert inside the with block so the file handle is still open
-            # during resize, then construct the PhotoImage before closing.
-            tk_img = ImageTk.PhotoImage(img.resize((w, h), Image.LANCZOS))  # type: ignore[attr-defined]
+            orig_w, orig_h = img.size
+            
+            # Calculate aspect ratios
+            ratio_w = max_w / orig_w
+            ratio_h = max_h / orig_h
+            
+            # Use the smaller scaling factor to ensure it fits without stretching
+            scale = min(ratio_w, ratio_h)
+            
+            new_w = int(orig_w * scale)
+            new_h = int(orig_h * scale)
+            
+            tk_img = ImageTk.PhotoImage(img.resize((new_w, new_h), Image.LANCZOS))
         return tk_img
