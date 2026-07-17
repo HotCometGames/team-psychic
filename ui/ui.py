@@ -191,6 +191,7 @@ class UI:
                 "Check that the data directory contains a valid consolidated_metadata.csv."
             )
         self.humanoid = data_parser.get_random()
+        self.humanoids = [self.humanoid]
 
 
         # --- Action buttons ---
@@ -238,8 +239,12 @@ class UI:
                         self.game_viewer.on_image_selected = None
                         
                         self.update_ui(scorekeeper)
+                        if hasattr(self.button_menu, 'enable_all'):
+                            self.button_menu.enable_all()
                         self.get_next(data_fp, data_parser, scorekeeper)
                         
+
+                   
                     # Inject our selection handler closure into the game viewer
                     self.game_viewer.on_image_selected = handle_choice
                 else:
@@ -276,6 +281,8 @@ class UI:
                         self.game_viewer.on_image_selected = None
                         
                         self.update_ui(scorekeeper)
+                        if hasattr(self.button_menu, 'enable_all'):
+                            self.button_menu.enable_all()
                         self.get_next(data_fp, data_parser, scorekeeper)
                         
                     # Inject our selection handler closure into the game viewer

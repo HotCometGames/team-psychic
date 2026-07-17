@@ -50,6 +50,11 @@ class GameViewer:
         self.canvas.bind("<Button-1>", self._on_canvas_click)
         self.create_photo(join(data_fp, humanoid.fp))
 
+        # Bind events for clicking and hover-outline indications
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        self.canvas.bind("<Motion>", self._on_canvas_hover)
+        self.canvas.bind("<Leave>", self._on_canvas_leave)
+
     def delete_photo(self, event: Any = None) -> None:
         """Remove the current photo from the canvas.
 
@@ -67,8 +72,15 @@ class GameViewer:
         equally among all images provided.
         """
         self.canvas.delete("photo")
-        self.photos = []
+        self.canvas.delete("indicator")
         
+        # Re-arm mouse listeners for new choices
+        self.canvas.bind("<Motion>", self._on_canvas_hover)
+        self.canvas.bind("<Leave>", self._on_canvas_leave)
+
+        self.photos = []
+        self.current_paths = file_paths
+
         num_images = len(file_paths)
         if num_images == 0:
             return
@@ -111,19 +123,57 @@ class GameViewer:
         self.create_photos([fp])
 
     def _on_canvas_click(self, event: Any) -> None:
-        """Determines which image slice was clicked based on its X coordinate."""
-        num_images = len(self.current_paths)
-        if num_images <= 1 or not self.on_image_selected:
-            return # No choice needed if there's only 1 image on screen
+            """Determines which image slice was clicked and fires the selection callback."""
+            num_images = len(self.current_paths)
+            if num_images <= 1 or not self.on_image_selected:
+                return
 
+            canvas_w = self.canvas.winfo_width()
+            slice_w = canvas_w / num_images
+            clicked_idx = int(event.x // slice_w)
+            
+            if 0 <= clicked_idx < num_images:
+                # Draw a permanent red outline around the final selected choice
+                self.canvas.delete("indicator")
+                canvas_h = self.canvas.winfo_height()
+                self.canvas.create_rectangle(
+                    clicked_idx * slice_w, 0,
+                    (clicked_idx + 1) * slice_w, canvas_h,
+                    outline="red", width=4, tags="photo"
+                )
+                
+                # Unbind temporary hover indicators so they stop moving
+                self.canvas.unbind("<Motion>")
+                self.canvas.unbind("<Leave>")
+                
+                # Execute the UI action callback switch
+                self.on_image_selected(clicked_idx)
+
+    def _on_canvas_hover(self, event: Any) -> None:
+        """Draws a real-time red selection box outline following the cursor layout."""
+        if not self.on_image_selected:
+            return
+                
+        num_images = len(self.current_paths)
+        if num_images <= 1:
+            return
+                
         canvas_w = self.canvas.winfo_width()
+        canvas_h = self.canvas.winfo_height()
         slice_w = canvas_w / num_images
-        
-        # Calculate index based on click position
-        clicked_idx = int(event.x // slice_w)
-        if 0 <= clicked_idx < num_images:
-            # Fire the UI callback passing back the chosen humanoid index
-            self.on_image_selected(clicked_idx)
+        hovered_idx = int(event.x // slice_w)
+            
+        self.canvas.delete("indicator")
+        if 0 <= hovered_idx < num_images:
+            self.canvas.create_rectangle(
+                hovered_idx * slice_w, 0,
+                (hovered_idx + 1) * slice_w, canvas_h,
+                outline="red", width=3, tags="indicator"
+            )
+
+    def _on_canvas_leave(self, event: Any) -> None:
+        """Cleans up outline tracking marks if the cursor exits the canvas."""
+        self.canvas.delete("indicator")
         
     def display_score(
         self, score: dict[str, int | float], end_reason: str = ""
