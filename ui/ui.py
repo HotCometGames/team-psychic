@@ -211,6 +211,7 @@ class UI:
                     **self._get_log_context(scorekeeper),
                 )
                 scorekeeper.skip(self.humanoid)
+                self.horde_meter.advance(zombie_delta=10, ambulance_delta=5)
                 self.update_ui(scorekeeper)
                 self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -222,6 +223,7 @@ class UI:
                     **self._get_log_context(scorekeeper),
                 )
                 scorekeeper.squish(self.humanoid)
+                self.horde_meter.advance(zombie_delta=10, ambulance_delta=10)
                 self.update_ui(scorekeeper)
                 self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -451,8 +453,6 @@ class UI:
         self.clock.update_time(hour, minute)
         self.capacity_meter.update_fill(max(0, scorekeeper.get_current_capacity()))
 
-        self.horde_meter.update_distance(50)  # Placeholder. This ensures the horde meter always shows a fixed distance for now
-        
     def _update_info_display(self, scorekeeper: ScoreKeeper) -> None:
         """Refresh the classifier/recommender output label for the current humanoid.
 
