@@ -450,8 +450,7 @@ class UI:
         hour, minute = self._time_to_clock_hands(scorekeeper.remaining_time)
         self.clock.update_time(hour, minute)
         self.capacity_meter.update_fill(max(0, scorekeeper.get_current_capacity()))
-        self.horde_meter.update_distance(scorekeeper.horde_distance)
-        
+
         self.horde_meter.update_distance(50)  # Placeholder. This ensures the horde meter always shows a fixed distance for now
         
     def _update_info_display(self, scorekeeper: ScoreKeeper) -> None:
