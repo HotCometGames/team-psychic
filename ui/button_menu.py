@@ -46,7 +46,7 @@ class ButtonMenu:
         self.canvas = tk.Canvas(
             root,
             width=500,
-            height=80,
+            height=180,
             bg=UI_COLORS["bg"],
             highlightthickness=0,
         )
