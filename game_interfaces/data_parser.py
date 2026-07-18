@@ -88,6 +88,13 @@ class DataParser:
 
         state = datarow_to_state(data_row)
 
+        role = data_row["Role"]
+        if not isinstance(role, str) or not role:
+            raise ValueError(
+                f"Invalid 'Role' value at row index {data_row.name!r}: {role!r}. "
+                "Check the metadata CSV for missing or non-string roles."
+            )
+
         filename = data_row["Filename"]
         if not isinstance(filename, str) or not filename:
             raise ValueError(
@@ -95,7 +102,7 @@ class DataParser:
                 "Check the metadata CSV for missing or non-string filenames."
             )
         value = datarow_to_value(data_row, rng=self.rng)
-        humanoid = Humanoid(fp=filename, state=state, value=value)
+        humanoid = Humanoid(fp=filename, state=state, role=role, value=value)
         return humanoid
 
 
