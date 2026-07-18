@@ -13,6 +13,17 @@ class State(Enum):
     INJURED = "injured"
     CORPSE = "corpse"
 
+class RoleState(Enum):
+    """Ground-truth humanoid roles.
+
+    These values correspond to the ``role`` column in the metadata CSV and to
+    the ``role`` attribute on :class:`~gameplay.humanoid.Humanoid`.
+    """
+
+    CIVILIAN = "civilian"
+    ENGINEER = "engineer"
+    MEDIC = "medic"
+
 
 class ActionState(Enum):
     """Player actions available each turn."""
