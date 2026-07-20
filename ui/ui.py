@@ -317,12 +317,13 @@ class UI:
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
                         self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
-                        
+
+                        self.horde_meter.advance(zombie_delta=10, ambulance_delta=0)
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
                             self.button_menu.enable_all()
                         self.get_next(data_fp, data_parser, scorekeeper)
-                        
+
                     # Inject our selection handler closure into the game viewer
                     self.game_viewer.on_image_selected = handle_choice
                 else:
@@ -332,6 +333,7 @@ class UI:
                         **self._get_log_context(scorekeeper),
                     )
                     scorekeeper.save(self.humanoid)
+                    self.horde_meter.advance(zombie_delta=10, ambulance_delta=0)
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
 
