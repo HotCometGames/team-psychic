@@ -18,13 +18,9 @@ class GameViewer:
     """
 
     canvas: tk.Canvas
-<<<<<<< Updated upstream
-    photo: Any | None  # ImageTk.PhotoImage | None
-=======
     photo: list[Any] | None  # ImageTk.PhotoImage | None
     current_paths: list[str] # Add an attribute to remember current paths
     on_image_selected: Any
->>>>>>> Stashed changes
 
     def __init__(self, root: Any, w: int, h: int, data_fp: str, humanoid: Any) -> None:
         """Create the game viewer canvas and display the first humanoid.
@@ -48,14 +44,15 @@ class GameViewer:
         self.canvas.update()
 
         self.photo = None
-<<<<<<< Updated upstream
-=======
         self.current_paths = []
         self.on_image_selected = None
 
-        self.canvas.bind("<Button-1>", self._on_canvas_click)
->>>>>>> Stashed changes
         self.create_photo(join(data_fp, humanoid.fp))
+
+        # Bind events for clicking and hover-outline indications
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        self.canvas.bind("<Motion>", self._on_canvas_hover)
+        self.canvas.bind("<Leave>", self._on_canvas_leave)
 
     def delete_photo(self, event: Any = None) -> None:
         """Remove the current photo from the canvas.
@@ -65,6 +62,53 @@ class GameViewer:
                 ``None`` when called directly.
         """
         self.canvas.delete("photo")
+        self.photos = []
+
+    def create_photos(self, file_paths: list[str]) -> None:
+        """Load a list of images from disk and display them side-by-side.
+
+        Replaces any existing photos. Automatically divides the canvas width 
+        equally among all images provided.
+        """
+        self.canvas.delete("photo")
+        self.canvas.delete("indicator")
+        
+        # Re-arm mouse listeners for new choices
+        self.canvas.bind("<Motion>", self._on_canvas_hover)
+        self.canvas.bind("<Leave>", self._on_canvas_leave)
+
+        self.photos = []
+        self.current_paths = file_paths
+
+        num_images = len(file_paths)
+        if num_images == 0:
+            return
+
+        # Calculate layout constraints
+        canvas_w = self.canvas.winfo_width()
+        canvas_h = self.canvas.winfo_height()
+        target_w = math.floor(canvas_w / num_images)
+
+        target_w = math.floor(canvas_w / num_images)
+        
+        for i, fp in enumerate(file_paths):
+            # Calculate the horizontal offset for each image
+            x_offset = i * target_w
+            
+            # Load and resize image to fit its fractional slice
+            photo = self._get_photo(fp, target_w, canvas_h)
+            self.photos.append(photo)
+            
+            img_h = photo.height()
+            y_offset = max(0, math.floor((canvas_h - img_h) / 2))
+
+            # Place onto the canvas canvas 
+            self.canvas.create_image(
+                x_offset, y_offset,  
+                anchor=tk.NW, 
+                image=photo, 
+                tags=("photo", f"idx_{i}")
+            )
 
     def create_photo(self, fp: str) -> None:
         """Load an image from disk and display it on the canvas.
@@ -75,14 +119,6 @@ class GameViewer:
         Args:
             fp: Path to the image file.
         """
-<<<<<<< Updated upstream
-        self.canvas.delete("photo")
-        self.photo = self._get_photo(
-            fp, self.canvas.winfo_width(), self.canvas.winfo_height()
-        )
-        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo, tags="photo")
-
-=======
         self.create_photos([fp])
 
     def _on_canvas_click(self, event: Any) -> None:
@@ -138,7 +174,6 @@ class GameViewer:
         """Cleans up outline tracking marks if the cursor exits the canvas."""
         self.canvas.delete("indicator")
         
->>>>>>> Stashed changes
     def display_score(
         self, score: dict[str, int | float], end_reason: str = ""
     ) -> None:
@@ -189,7 +224,7 @@ class GameViewer:
         ).pack(anchor=tk.NW)
 
     @staticmethod
-    def _get_photo(img_path: str, w: int, h: int) -> Any:
+    def _get_photo(img_path: str, max_w: int, max_h: int) -> Any:
         """Load, resize, and return a Tkinter-compatible photo image.
 
         Args:
@@ -201,7 +236,17 @@ class GameViewer:
             An :class:`~PIL.ImageTk.PhotoImage` resized to ``(w, h)``.
         """
         with Image.open(img_path) as img:
-            # Convert inside the with block so the file handle is still open
-            # during resize, then construct the PhotoImage before closing.
-            tk_img = ImageTk.PhotoImage(img.resize((w, h), Image.LANCZOS))  # type: ignore[attr-defined]
+            orig_w, orig_h = img.size
+            
+            # Calculate aspect ratios
+            ratio_w = max_w / orig_w
+            ratio_h = max_h / orig_h
+            
+            # Use the smaller scaling factor to ensure it fits without stretching
+            scale = min(ratio_w, ratio_h)
+            
+            new_w = int(orig_w * scale)
+            new_h = int(orig_h * scale)
+            
+            tk_img = ImageTk.PhotoImage(img.resize((new_w, new_h), Image.LANCZOS))
         return tk_img
