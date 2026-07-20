@@ -120,6 +120,10 @@ class UI:
     recommender: ActionRecommender | None
     _auto_execute: bool
     _show_classifier_label: bool
+    round_num: int
+    total_saved: int
+    total_killed: int
+    total_saved_value: float
     humanoid: Humanoid
     button_menu: ButtonMenu
     game_viewer: GameViewer
@@ -193,6 +197,10 @@ class UI:
                 "Dataset is empty — no humanoids to draw. "
                 "Check that the data directory contains a valid consolidated_metadata.csv."
             )
+        self.round_num = 1
+        self.total_saved = 0
+        self.total_killed = 0
+        self.total_saved_value = 0.0
         self.humanoid = data_parser.get_random()
         self.humanoids = [self.humanoid]
 
@@ -239,10 +247,22 @@ class UI:
                             **self._get_log_context(scorekeeper),
                         )
                         scorekeeper.squish(selected_humanoid)
-                        
+
+                        for idx, h in enumerate(self.humanoids):
+                            if idx != chosen_index:
+                                self.humanoid = h
+                                scorekeeper.log_turn(
+                                    h,
+                                    "skip",
+                                    **self._get_log_context(scorekeeper),
+                                )
+                                scorekeeper.skip(h)
+
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
+                        self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
-                        
+
+                        self.horde_meter.advance(zombie_delta=10, ambulance_delta=15)
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
                             self.button_menu.enable_all()
@@ -259,18 +279,9 @@ class UI:
                         **self._get_log_context(scorekeeper),
                     )
                     scorekeeper.squish(self.humanoid)
+                    self.horde_meter.advance(zombie_delta=10, ambulance_delta=15)
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
-
-                scorekeeper.log_turn(
-                    self.humanoid,
-                    "squish",
-                    **self._get_log_context(scorekeeper),
-                )
-                scorekeeper.squish(self.humanoid)
-                self.horde_meter.advance(zombie_delta=10, ambulance_delta=15)
-                self.update_ui(scorekeeper)
-                self.get_next(data_fp, data_parser, scorekeeper)
 
 
             def _on_save() -> None:
@@ -292,8 +303,19 @@ class UI:
                             **self._get_log_context(scorekeeper),
                         )
                         scorekeeper.save(selected_humanoid)
-                        
+
+                        for idx, h in enumerate(self.humanoids):
+                            if idx != chosen_index:
+                                self.humanoid = h
+                                scorekeeper.log_turn(
+                                    h,
+                                    "skip",
+                                    **self._get_log_context(scorekeeper),
+                                )
+                                scorekeeper.skip(h)
+
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
+                        self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
                         
                         self.update_ui(scorekeeper)
@@ -574,14 +596,31 @@ class UI:
             score = (
                 scorekeeper.get_score()
             )  # scrams remaining passengers; ambulance now empty
+            self.total_saved += score["saved"]
+            self.total_killed += score["killed"]
+            self.total_saved_value += score["saved_value"]
             self.capacity_meter.update_fill(max(0, scorekeeper.get_current_capacity()))
-            self.game_viewer.display_score(score, end_reason=end_reason)
             # Disable buttons before reset() — reset() restores remaining_time to the
             # full shift length, which would fool disable_buttons() into re-enabling them.
             self.button_menu.disable_all()
             if self.log:
                 scorekeeper.reset()  # commit episode to all_logs before writing
                 scorekeeper.save_log()
+
+            def _on_continue() -> None:
+                self._start_next_round(data_fp, data_parser, scorekeeper)
+
+            self.game_viewer.display_score(
+                score,
+                end_reason=end_reason,
+                round_num=self.round_num,
+                totals={
+                    "saved": self.total_saved,
+                    "killed": self.total_killed,
+                    "saved_value": self.total_saved_value,
+                },
+                on_continue=_on_continue,
+            )
         else:
             show_two = random() < 0.20
 
@@ -606,6 +645,45 @@ class UI:
                 len(data_parser.unvisited),
                 scorekeeper.at_capacity(),
             )
+
+    def _start_next_round(
+        self,
+        data_fp: str,
+        data_parser: DataParser,
+        scorekeeper: ScoreKeeper,
+    ) -> None:
+        """Reset shift state and draw the first humanoid of the next round.
+
+        Fired by the camp screen's "Continue to Next Round" button.
+        ``scorekeeper.reset()`` is idempotent — safe to call again even when
+        ``get_next()`` already called it for logging purposes — and
+        ``data_parser.reset()`` refills the unvisited pool so the next round
+        has the full dataset to draw from.
+
+        Args:
+            data_fp: Root path for image files.
+            data_parser: DataParser to refill for the new round.
+            scorekeeper: ScoreKeeper to reset for the new round.
+        """
+        self.round_num += 1
+        scorekeeper.reset()
+        data_parser.reset()
+        self.game_viewer.clear_score_display()
+
+        self.humanoids = [data_parser.get_random()]
+        self.humanoid = self.humanoids[0]
+        self._last_probs = None
+        self._last_recommended_action = None
+        img_paths = [join(data_fp, h.fp) for h in self.humanoids]
+        self.game_viewer.create_photos(img_paths)
+        self._update_info_display(scorekeeper)
+        self.value_label.config(text=self._value_label_text(self.humanoid.value))
+        self.update_ui(scorekeeper)
+        self.button_menu.disable_buttons(
+            scorekeeper.remaining_time,
+            len(data_parser.unvisited),
+            scorekeeper.at_capacity(),
+        )
 
     @staticmethod
     def _value_label_text(value: float) -> str:
