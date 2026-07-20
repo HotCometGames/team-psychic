@@ -11,7 +11,7 @@ import os
 
 # Game rules
 SHIFT_LENGTH: int = 720  # total game time in minutes
-AMBULANCE_CAPACITY: int = 10  # max humanoids the ambulance can hold at once
+AMBULANCE_CAPACITY: int = 15  # max humanoids the ambulance can hold at once
 
 # UI window dimensions
 WINDOW_WIDTH: int = 1280
