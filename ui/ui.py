@@ -136,6 +136,7 @@ class UI:
     _game_label: tk.Label | None  # keeps game-logo PhotoImage alive
     _bwsi_label: tk.Label | None  # keeps BWSI-logo PhotoImage alive
 
+
     def __init__(
         self,
         data_parser: DataParser,
@@ -201,6 +202,7 @@ class UI:
         self.total_saved = 0
         self.total_killed = 0
         self.total_saved_value = 0.0
+        self.saved_passengers = []
         self.humanoid = data_parser.get_random()
         self.humanoids = [self.humanoid]
 
@@ -304,6 +306,7 @@ class UI:
                             **self._get_log_context(scorekeeper),
                         )
                         scorekeeper.save(selected_humanoid)
+                        self.saved_passengers.append(selected_humanoid)
                         
                         # 2. Log any unchosen image(s) as skipped
                         for idx, h in enumerate(self.humanoids):
@@ -334,6 +337,7 @@ class UI:
                         **self._get_log_context(scorekeeper),
                     )
                     scorekeeper.save(self.humanoid)
+                    self.saved_passengers.append(self.humanoid)
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -551,7 +555,8 @@ class UI:
         """
         hour, minute = self._time_to_clock_hands(scorekeeper.remaining_time)
         self.clock.update_time(hour, minute)
-        self.capacity_meter.update_fill(max(0, scorekeeper.get_current_capacity()))
+
+        self.capacity_meter.update_fill(self.saved_passengers)
 
     def _update_info_display(self, scorekeeper: ScoreKeeper) -> None:
         """Refresh the classifier/recommender output label for the current humanoid.
@@ -676,6 +681,7 @@ class UI:
             scorekeeper: ScoreKeeper to reset for the new round.
         """
         self.round_num += 1
+        self.saved_passengers.clear()
         scorekeeper.reset()
         data_parser.reset()
         self.game_viewer.clear_score_display()
