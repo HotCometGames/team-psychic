@@ -43,6 +43,7 @@ import tkinter as tk
 from os.path import abspath, dirname, join
 from typing import Any
 
+
 import numpy as np
 from PIL import Image, ImageTk
 
@@ -66,7 +67,9 @@ from ui.capacity_meter import CapacityMeter
 from ui.clock import Clock
 from ui.digital_clock import DigitalClock
 from ui.game_viewer import GameViewer
+
 from random import random
+from ui.horde_meter import HordeMeter
 
 # Feature flag: swap clock implementations by changing LEGACY_CLOCK in gameplay/constants.py.
 # This is a teaching example of the feature-flag pattern — see constants.py for details.
@@ -212,11 +215,13 @@ class UI:
                     **self._get_log_context(scorekeeper),
                 )
                 scorekeeper.skip(self.humanoid)
+                self.horde_meter.advance(zombie_delta=10, ambulance_delta=5)
                 self.update_ui(scorekeeper)
                 self.get_next(data_fp, data_parser, scorekeeper)
 
             def _on_squish() -> None:
                 self.button_menu.disable_all()
+                
                 if len(self.humanoids) > 1:
                     # Prompt the user to select an image by clicking it
                     self.value_label.config(text="SELECT: Click the image you want to SQUISH")
@@ -256,6 +261,17 @@ class UI:
                     scorekeeper.squish(self.humanoid)
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
+
+                scorekeeper.log_turn(
+                    self.humanoid,
+                    "squish",
+                    **self._get_log_context(scorekeeper),
+                )
+                scorekeeper.squish(self.humanoid)
+                self.horde_meter.advance(zombie_delta=10, ambulance_delta=10)
+                self.update_ui(scorekeeper)
+                self.get_next(data_fp, data_parser, scorekeeper)
+
 
             def _on_save() -> None:
                 self.button_menu.disable_all()
@@ -334,6 +350,15 @@ class UI:
 
         # --- Ambulance capacity meter ---
         self.capacity_meter = CapacityMeter(self.root, w, h, AMBULANCE_CAPACITY)
+        
+        # --- Horde distance meter ---
+        self.horde_meter = HordeMeter(
+            self.root, w, h,
+            max_distance=100,
+            initial_distance=10,
+            zombie_img_path=join(dirname(abspath(__file__)), "graphics", "zombie.png"),
+            ambulance_img_path=join(dirname(abspath(__file__)), "graphics", "ambulance.png"),
+        )
 
         # --- Value display ---
         self.value_label = tk.Label(
