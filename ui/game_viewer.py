@@ -30,7 +30,9 @@ class GameViewer:
     photo: list[Any] | None  # ImageTk.PhotoImage | None
     current_paths: list[str] # Add an attribute to remember current paths
     on_image_selected: Any
+
     _score_widgets: list[tk.Widget]
+
 
     def __init__(self, root: Any, w: int, h: int, data_fp: str, humanoid: Any) -> None:
         """Create the game viewer canvas and display the first humanoid.
@@ -56,6 +58,7 @@ class GameViewer:
         self.photo = None
         self.current_paths = []
         self.on_image_selected = None
+
         self._score_widgets = []
         self.create_photo(join(data_fp, humanoid.fp))
 
@@ -183,6 +186,7 @@ class GameViewer:
     def _on_canvas_leave(self, event: Any) -> None:
         """Cleans up outline tracking marks if the cursor exits the canvas."""
         self.canvas.delete("indicator")
+
 
     def clear_score_display(self) -> None:
         """Destroy any camp-screen widgets left over from the previous round.
