@@ -22,6 +22,7 @@ DATA_DIR: str = "data"
 
 # Model weight paths — update these to point to your trained models
 CLASSIFIER_MODEL_PATH: str = os.path.join("models", "weights", "baselineCNN.pth")
+ROLE_CLASSIFIER_MODEL_PATH: str = os.path.join("models", "weights", "baselineRoleCNN.pth")
 RL_MODEL_PATH: str = os.path.join("models", "weights", "baselineRL.pth")
 
 # Clock display style.

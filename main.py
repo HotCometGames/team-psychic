@@ -330,6 +330,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to save trained weights. Default: each script's own default path.",
     )
+    train_parser.add_argument(
+        "--model",
+        type=str,
+        choices=["default", "role"],
+        default="default",
+        help="Which CNN to train: default=DefaultCNN, role=RoleCNN",
+    )
     return parser
 
 
@@ -351,9 +358,8 @@ if __name__ == "__main__":
                 data_dir=args.data,
                 epochs=args.epochs if args.epochs is not None else NUM_EPOCHS,
                 seed=args.seed,
-                save_path=(
-                    args.output if args.output is not None else CLASSIFIER_MODEL_PATH
-                ),
+                save_path=(args.output if args.output is not None else None),
+                model_name=args.model,
             )
     else:
         Main(args.mode, args.log, args.data, args.seed)

@@ -52,10 +52,15 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 from game_interfaces.data_parser import datarow_to_state  # noqa: E402
-from gameplay.constants import CLASSIFIER_MODEL_PATH, DATA_DIR  # noqa: E402
-from gameplay.enums import State  # noqa: E402
+from gameplay.constants import (  # noqa: E402
+    CLASSIFIER_MODEL_PATH,
+    DATA_DIR,
+    ROLE_CLASSIFIER_MODEL_PATH,
+)
+from gameplay.enums import RoleState, State  # noqa: E402
 from gameplay.humanoid import MAP_CLASS_STR_TO_INT  # noqa: E402
 from models.DefaultCNN import DefaultCNN  # noqa: E402
+from models.RoleCNN import RoleCNN  # noqa: E402
 
 # ── Hyperparameters ────────────────────────────────────────────────────────────
 NUM_EPOCHS: int = 10
@@ -68,6 +73,7 @@ SEED: int | None = 42
 NUM_CLASSES: int = len(State)
 
 CNN_LOG_DIR: str = "training/CNN-logs"
+ROLE_CNN_LOG_DIR: str = "training/RoleCNN-logs"
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -84,7 +90,29 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def _datarow_to_label(row: pd.Series) -> int:
+def _is_injured(value: object) -> bool:
+    """Normalize CSV injury values to a reliable boolean."""
+    if value is True or value == 1:
+        return True
+    if pd.isna(value):
+        return False
+    return str(value).strip().lower() == "true"
+
+
+def _filter_rows_for_model(df: pd.DataFrame, model_name: str) -> pd.DataFrame:
+    """Return the subset of metadata rows used for a given model."""
+    filtered = df.copy()
+    if model_name == "role":
+        filtered = filtered[filtered["Class"].astype(str).str.strip() == "Default"]
+        filtered = filtered[~filtered["Injured"].apply(_is_injured)]
+        allowed_roles = {role.value for role in RoleState}
+        filtered = filtered[
+            filtered["Role"].astype(str).str.strip().str.lower().isin(allowed_roles)
+        ]
+    return filtered
+
+
+def _datarow_to_label(row: pd.Series, model_name: str) -> int:
     """Map a metadata CSV row to an integer class label.
 
     Delegates to :func:`~game_interfaces.data_parser.datarow_to_state` so
@@ -93,10 +121,20 @@ def _datarow_to_label(row: pd.Series) -> int:
 
     Args:
         row: A pandas Series (one row of the metadata DataFrame).
+        model_name: Either ``"default"`` or ``"role"``.
 
     Returns:
         Integer class index matching :data:`~gameplay.humanoid.MAP_CLASS_STR_TO_INT`.
     """
+    if model_name == "role":
+        role = str(row["Role"]).strip().lower()
+        if role == RoleState.CIVILIAN.value:
+            return 0
+        if role == RoleState.MEDIC.value:
+            return 1
+        if role == RoleState.ENGINEER.value:
+            return 2
+        raise ValueError(f"Unsupported role label: {role!r}")
     return MAP_CLASS_STR_TO_INT[datarow_to_state(row)]
 
 
@@ -120,6 +158,7 @@ class HumanoidDataset(Dataset):
         metadata_path: str,
         img_data_root: str,
         transform: "transforms.Compose | None" = None,
+        model_name: str = "default",
     ) -> None:
         """Load the metadata CSV and build the image/label lists.
 
@@ -133,8 +172,9 @@ class HumanoidDataset(Dataset):
         self.transform = transform
 
         df = pd.read_csv(metadata_path)
-        self.image_paths = df["Filename"].tolist()
-        self.labels = [_datarow_to_label(row) for _, row in df.iterrows()]
+        filtered_df = _filter_rows_for_model(df, model_name)
+        self.image_paths = filtered_df["Filename"].tolist()
+        self.labels = [_datarow_to_label(row, model_name) for _, row in filtered_df.iterrows()]
 
     def __len__(self) -> int:
         """Return the total number of images in the dataset."""
@@ -161,7 +201,7 @@ class HumanoidDataset(Dataset):
 
 def _save_cnn_plots(
     history: dict,
-    model: DefaultCNN,
+    model: nn.Module,
     val_loader: DataLoader,
     device: torch.device,
     class_names: list[str],
@@ -259,10 +299,12 @@ def train(
     data_dir: str = DATA_DIR,
     epochs: int = NUM_EPOCHS,
     seed: int | None = SEED,
-    save_path: str = CLASSIFIER_MODEL_PATH,
-    log_dir: str = CNN_LOG_DIR,
+    save_path: str | None = None,
+    log_dir: str | None = None,
+    model_name: str = "default",
+    model_cls: type[nn.Module] | nn.Module | None = None,
 ) -> None:
-    """Train DefaultCNN on the consolidated dataset and save weights.
+    """Train a CNN classifier on the consolidated dataset and save weights.
 
     Loads the dataset from ``data_dir/consolidated_metadata.csv``, splits it
     into train/val sets, runs ``epochs`` of training with Adam +
@@ -274,9 +316,19 @@ def train(
             ``consolidated_metadata.csv``.
         epochs: Total number of training epochs.
         seed: Random seed for reproducibility. Pass None to disable seeding.
-        save_path: Path to write the trained model weights (.pth).
-        log_dir: Directory to write training plots into (default: CNN-logs/).
+        save_path: Path to write the trained model weights (.pth). If omitted,
+            uses the model-specific default path.
+        log_dir: Directory to write training plots into. If omitted, uses the
+            model-specific default log directory.
+        model_name: Either ``"default"`` or ``"role"``.
+        model_cls: Optional model class or model instance to train. If omitted,
+            the trainer selects ``DefaultCNN`` or ``RoleCNN`` based on
+            ``model_name``.
     """
+    model_name = model_name.lower()
+    if model_name not in {"default", "role"}:
+        raise ValueError(f"Unsupported model_name: {model_name!r}")
+
     if seed is not None:
         set_seed(seed)
 
@@ -284,6 +336,21 @@ def train(
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Device: {device}")
+
+    if save_path is None:
+        save_path = (
+            ROLE_CLASSIFIER_MODEL_PATH if model_name == "role" else CLASSIFIER_MODEL_PATH
+        )
+    if log_dir is None:
+        log_dir = ROLE_CNN_LOG_DIR if model_name == "role" else CNN_LOG_DIR
+
+    class_names = [s.value for s in State] if model_name == "default" else [
+        RoleState.CIVILIAN.value,
+        RoleState.MEDIC.value,
+        RoleState.ENGINEER.value,
+    ]
+    num_classes = len(class_names)
+    print(f"Training {model_name} CNN with {num_classes} outputs: {class_names}")
 
     # Normalization statistics must match CNNClassifier.classify() exactly —
     # the same mean/std applied at training time must be applied at inference
@@ -342,8 +409,18 @@ def train(
     # Build two dataset instances over the same files — one per transform.
     # We then assign the same split indices to both so train and val images
     # never overlap, while each split gets its own transform pipeline.
-    train_dataset = HumanoidDataset(metadata_path, data_dir, transform=train_transforms)
-    val_dataset = HumanoidDataset(metadata_path, data_dir, transform=val_transforms)
+    train_dataset = HumanoidDataset(
+        metadata_path,
+        data_dir,
+        transform=train_transforms,
+        model_name=model_name,
+    )
+    val_dataset = HumanoidDataset(
+        metadata_path,
+        data_dir,
+        transform=val_transforms,
+        model_name=model_name,
+    )
 
     n_total = len(train_dataset)
     val_size = max(1, int(n_total * VAL_SPLIT))
@@ -363,7 +440,16 @@ def train(
     val_loader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False)
     print(f"Train: {train_size} samples | Val: {val_size} samples")
 
-    model = DefaultCNN(num_classes_=NUM_CLASSES).to(device)
+    if isinstance(model_cls, nn.Module):
+        model = model_cls.to(device)
+    elif model_cls is not None:
+        model_kwargs = {"num_roles_": num_classes} if model_name == "role" else {"num_classes_": num_classes}
+        model = model_cls(**model_kwargs).to(device)
+    else:
+        model_cls = RoleCNN if model_name == "role" else DefaultCNN
+        model_kwargs = {"num_roles_": num_classes} if model_name == "role" else {"num_classes_": num_classes}
+        model = model_cls(**model_kwargs).to(device)
+
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
@@ -429,7 +515,6 @@ def train(
     torch.save(model.state_dict(), save_path)
     print(f"\nWeights saved to {save_path}")
 
-    class_names = [s.value for s in State]
     _save_cnn_plots(history, model, val_loader, device, class_names, log_dir)
 
 
