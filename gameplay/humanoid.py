@@ -1,4 +1,5 @@
 from gameplay.enums import State
+from gameplay.enums import RoleState
 
 # Convenience mappings to make converting these throughout the code less error prone
 MAP_CLASS_STR_TO_INT: dict[str, int] = {s.value: i for i, s in enumerate(State)}
@@ -21,18 +22,21 @@ class Humanoid:
 
     fp: str
     state: str
+    role: str
     value: float
 
-    def __init__(self, fp: str, state: str, value: float = 0.0) -> None:
+    def __init__(self, fp: str, state: str, role: str, value: float = 0.0) -> None:
         """Initialize a Humanoid.
 
         Args:
             fp: Relative file path to the humanoid's image.
             state: Ground-truth state string (e.g. ``"zombie"``, ``"healthy"``).
+            role: Ground-truth role string (e.g. ``"civilian"``, ``"medic"``).
             value: Numeric priority score in [0.0, 1.0]. Assigned randomly by DataParser; higher = higher triage priority.
         """
         self.fp = fp
         self.state = state
+        self.role = role
         self.value = value
 
     def is_zombie(self) -> bool:
@@ -50,6 +54,18 @@ class Humanoid:
     def is_corpse(self) -> bool:
         """Return True if this humanoid is a corpse."""
         return self.state == State.CORPSE.value
+    
+    def is_civilian(self) -> bool:
+        """Return True if this humanoid is a civilian."""
+        return self.role == RoleState.CIVILIAN.value
+
+    def is_engineer(self) -> bool:
+        """Return True if this humanoid is an engineer."""
+        return self.role == RoleState.ENGINEER.value
+
+    def is_medic(self) -> bool:
+        """Return True if this humanoid is a medic."""
+        return self.role == RoleState.MEDIC.value
 
     @staticmethod
     def get_state_idx(class_string: str) -> int:
