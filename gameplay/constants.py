@@ -67,4 +67,5 @@ UI_COLORS: dict[str, str] = {
     "btn_active": "#4a4a4a",  # hover / active state
     "meter_filled": "#e63946",  # ambulance slot filled (danger red)
     "accent": "#e63946",  # highlights and end-screen text
+    "card_border": "#3a3a3a",  # camp-screen stat card outline
 }
