@@ -248,9 +248,21 @@ class UI:
                         )
                         scorekeeper.squish(selected_humanoid)
                         
+                        for idx, h in enumerate(self.humanoids):
+                            if idx != chosen_index:
+                                self.humanoid = h
+                                scorekeeper.log_turn(
+                                    h,
+                                    "skip",
+                                    **self._get_log_context(scorekeeper),
+                                )
+                                scorekeeper.skip(h)
+
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
+                        self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
                         
+                        self.horde_meter.advance(zombie_delta=10, ambulance_delta=10)
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
                             self.button_menu.enable_all()
@@ -269,16 +281,8 @@ class UI:
                     scorekeeper.squish(self.humanoid)
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
-
-                scorekeeper.log_turn(
-                    self.humanoid,
-                    "squish",
-                    **self._get_log_context(scorekeeper),
-                )
-                scorekeeper.squish(self.humanoid)
-                self.horde_meter.advance(zombie_delta=10, ambulance_delta=10)
-                self.update_ui(scorekeeper)
-                self.get_next(data_fp, data_parser, scorekeeper)
+                    self.horde_meter.advance(zombie_delta=10, ambulance_delta=10)
+            
 
 
             def _on_save() -> None:
@@ -301,7 +305,19 @@ class UI:
                         )
                         scorekeeper.save(selected_humanoid)
                         
+                        # 2. Log any unchosen image(s) as skipped
+                        for idx, h in enumerate(self.humanoids):
+                            if idx != chosen_index:
+                                self.humanoid = h
+                                scorekeeper.log_turn(
+                                    h,
+                                    "skip",
+                                    **self._get_log_context(scorekeeper),
+                                )
+                                scorekeeper.skip(h)
+
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
+                        self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
                         
                         self.update_ui(scorekeeper)
