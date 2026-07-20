@@ -67,6 +67,8 @@ from ui.capacity_meter import CapacityMeter
 from ui.clock import Clock
 from ui.digital_clock import DigitalClock
 from ui.game_viewer import GameViewer
+
+from random import random
 from ui.horde_meter import HordeMeter
 
 # Feature flag: swap clock implementations by changing LEGACY_CLOCK in gameplay/constants.py.
@@ -118,6 +120,10 @@ class UI:
     recommender: ActionRecommender | None
     _auto_execute: bool
     _show_classifier_label: bool
+    round_num: int
+    total_saved: int
+    total_killed: int
+    total_saved_value: float
     humanoid: Humanoid
     button_menu: ButtonMenu
     game_viewer: GameViewer
@@ -191,7 +197,13 @@ class UI:
                 "Dataset is empty — no humanoids to draw. "
                 "Check that the data directory contains a valid consolidated_metadata.csv."
             )
+        self.round_num = 1
+        self.total_saved = 0
+        self.total_killed = 0
+        self.total_saved_value = 0.0
         self.humanoid = data_parser.get_random()
+        self.humanoids = [self.humanoid]
+
 
         # --- Action buttons ---
         if self._auto_execute:
@@ -217,6 +229,47 @@ class UI:
 
             def _on_squish() -> None:
                 self.button_menu.disable_all()
+                
+                if len(self.humanoids) > 1:
+                    # Prompt the user to select an image by clicking it
+                    self.value_label.config(text="SELECT: Click the image you want to SQUISH")
+                    
+                    def handle_choice(chosen_index: int) -> None:
+                        # Grab the targeted humanoid from the active list
+                        selected_humanoid = self.humanoids[chosen_index]
+                        
+                        # Temporarily swap self.humanoid context for accurate logging calculations
+                        self.humanoid = selected_humanoid
+                        
+                        scorekeeper.log_turn(
+                            selected_humanoid,
+                            "squish",
+                            **self._get_log_context(scorekeeper),
+                        )
+                        scorekeeper.squish(selected_humanoid)
+                        
+                        # Clear the selection listener callback so it doesn't fire unexpectedly later
+                        self.game_viewer.on_image_selected = None
+                        
+                        self.update_ui(scorekeeper)
+                        if hasattr(self.button_menu, 'enable_all'):
+                            self.button_menu.enable_all()
+                        self.get_next(data_fp, data_parser, scorekeeper)
+                        
+
+                   
+                    # Inject our selection handler closure into the game viewer
+                    self.game_viewer.on_image_selected = handle_choice
+                else:
+                    scorekeeper.log_turn(
+                        self.humanoid,
+                        "squish",
+                        **self._get_log_context(scorekeeper),
+                    )
+                    scorekeeper.squish(self.humanoid)
+                    self.update_ui(scorekeeper)
+                    self.get_next(data_fp, data_parser, scorekeeper)
+
                 scorekeeper.log_turn(
                     self.humanoid,
                     "squish",
@@ -227,16 +280,46 @@ class UI:
                 self.update_ui(scorekeeper)
                 self.get_next(data_fp, data_parser, scorekeeper)
 
+
             def _on_save() -> None:
                 self.button_menu.disable_all()
-                scorekeeper.log_turn(
-                    self.humanoid,
-                    "save",
-                    **self._get_log_context(scorekeeper),
-                )
-                scorekeeper.save(self.humanoid)
-                self.update_ui(scorekeeper)
-                self.get_next(data_fp, data_parser, scorekeeper)
+
+                if len(self.humanoids) > 1:
+                    self.value_label.config(text="SELECT: Click the image you want to SAVE")
+                    
+                    def handle_choice(chosen_index: int) -> None:
+                        # Grab the targeted humanoid from the active list
+                        selected_humanoid = self.humanoids[chosen_index]
+                        
+                        # Temporarily swap self.humanoid context for accurate logging calculations
+                        self.humanoid = selected_humanoid
+                        
+                        scorekeeper.log_turn(
+                            selected_humanoid,
+                            "save",
+                            **self._get_log_context(scorekeeper),
+                        )
+                        scorekeeper.save(selected_humanoid)
+                        
+                        # Clear the selection listener callback so it doesn't fire unexpectedly later
+                        self.game_viewer.on_image_selected = None
+                        
+                        self.update_ui(scorekeeper)
+                        if hasattr(self.button_menu, 'enable_all'):
+                            self.button_menu.enable_all()
+                        self.get_next(data_fp, data_parser, scorekeeper)
+                        
+                    # Inject our selection handler closure into the game viewer
+                    self.game_viewer.on_image_selected = handle_choice
+                else:
+                    scorekeeper.log_turn(
+                        self.humanoid,
+                        "save",
+                        **self._get_log_context(scorekeeper),
+                    )
+                    scorekeeper.save(self.humanoid)
+                    self.update_ui(scorekeeper)
+                    self.get_next(data_fp, data_parser, scorekeeper)
 
             def _on_scram() -> None:
                 self.button_menu.disable_all()
@@ -253,7 +336,6 @@ class UI:
                 (f"Skip [-{ActionCost.SKIP.value} min]", _on_skip),
                 (f"Squish [-{ActionCost.SQUISH.value} min]", _on_squish),
                 (f"Save [-{ActionCost.SAVE.value} min]", _on_save),
-                (f"Scram [-{ActionCost.SCRAM.value} min]", _on_scram),
             ]
             self.button_menu = ButtonMenu(self.root, user_buttons)
 
@@ -500,21 +582,47 @@ class UI:
             score = (
                 scorekeeper.get_score()
             )  # scrams remaining passengers; ambulance now empty
+            self.total_saved += score["saved"]
+            self.total_killed += score["killed"]
+            self.total_saved_value += score["saved_value"]
             self.capacity_meter.update_fill(max(0, scorekeeper.get_current_capacity()))
-            self.game_viewer.display_score(score, end_reason=end_reason)
             # Disable buttons before reset() — reset() restores remaining_time to the
             # full shift length, which would fool disable_buttons() into re-enabling them.
             self.button_menu.disable_all()
             if self.log:
                 scorekeeper.reset()  # commit episode to all_logs before writing
                 scorekeeper.save_log()
+
+            def _on_continue() -> None:
+                self._start_next_round(data_fp, data_parser, scorekeeper)
+
+            self.game_viewer.display_score(
+                score,
+                end_reason=end_reason,
+                round_num=self.round_num,
+                totals={
+                    "saved": self.total_saved,
+                    "killed": self.total_killed,
+                    "saved_value": self.total_saved_value,
+                },
+                on_continue=_on_continue,
+            )
         else:
-            self.humanoid = data_parser.get_random()
+            show_two = random() < 0.20
+
+            self.humanoids = [data_parser.get_random()]
+            if show_two and data_parser.unvisited:
+                 self.humanoids.append(data_parser.get_random())
+                
+            self.humanoid = self.humanoids[0]
             self._last_probs = (
                 None  # invalidate cache — new humanoid, old probs are stale
             )
             self._last_recommended_action = None
-            self.game_viewer.create_photo(join(data_fp, self.humanoid.fp))
+
+            img_paths = [join(data_fp, h.fp) for h in self.humanoids]
+            self.game_viewer.create_photos(img_paths)
+
             # Refresh classifier/recommender output and value label for the new humanoid
             self._update_info_display(scorekeeper)
             self.value_label.config(text=self._value_label_text(self.humanoid.value))
@@ -523,6 +631,45 @@ class UI:
                 len(data_parser.unvisited),
                 scorekeeper.at_capacity(),
             )
+
+    def _start_next_round(
+        self,
+        data_fp: str,
+        data_parser: DataParser,
+        scorekeeper: ScoreKeeper,
+    ) -> None:
+        """Reset shift state and draw the first humanoid of the next round.
+
+        Fired by the camp screen's "Continue to Next Round" button.
+        ``scorekeeper.reset()`` is idempotent — safe to call again even when
+        ``get_next()`` already called it for logging purposes — and
+        ``data_parser.reset()`` refills the unvisited pool so the next round
+        has the full dataset to draw from.
+
+        Args:
+            data_fp: Root path for image files.
+            data_parser: DataParser to refill for the new round.
+            scorekeeper: ScoreKeeper to reset for the new round.
+        """
+        self.round_num += 1
+        scorekeeper.reset()
+        data_parser.reset()
+        self.game_viewer.clear_score_display()
+
+        self.humanoids = [data_parser.get_random()]
+        self.humanoid = self.humanoids[0]
+        self._last_probs = None
+        self._last_recommended_action = None
+        img_paths = [join(data_fp, h.fp) for h in self.humanoids]
+        self.game_viewer.create_photos(img_paths)
+        self._update_info_display(scorekeeper)
+        self.value_label.config(text=self._value_label_text(self.humanoid.value))
+        self.update_ui(scorekeeper)
+        self.button_menu.disable_buttons(
+            scorekeeper.remaining_time,
+            len(data_parser.unvisited),
+            scorekeeper.at_capacity(),
+        )
 
     @staticmethod
     def _value_label_text(value: float) -> str:
