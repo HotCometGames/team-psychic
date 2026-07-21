@@ -136,6 +136,7 @@ class UI:
     _game_label: tk.Label | None  # keeps game-logo PhotoImage alive
     _bwsi_label: tk.Label | None  # keeps BWSI-logo PhotoImage alive
 
+
     def __init__(
         self,
         data_parser: DataParser,
@@ -201,6 +202,7 @@ class UI:
         self.total_saved = 0
         self.total_killed = 0
         self.total_saved_value = 0.0
+        self.saved_passengers = []
         self.humanoid = data_parser.get_random()
         self.humanoids = [self.humanoid]
 
@@ -303,7 +305,9 @@ class UI:
                             **self._get_log_context(scorekeeper),
                         )
                         scorekeeper.save(selected_humanoid)
+                        self.saved_passengers.append(selected_humanoid)
 
+                        # 2. Log any unchosen image(s) as skipped
                         for idx, h in enumerate(self.humanoids):
                             if idx != chosen_index:
                                 self.humanoid = h
@@ -333,6 +337,7 @@ class UI:
                         **self._get_log_context(scorekeeper),
                     )
                     scorekeeper.save(self.humanoid)
+                    self.saved_passengers.append(self.humanoid)
                     self.horde_meter.advance(zombie_delta=10, ambulance_delta=0)
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
@@ -551,7 +556,8 @@ class UI:
         """
         hour, minute = self._time_to_clock_hands(scorekeeper.remaining_time)
         self.clock.update_time(hour, minute)
-        self.capacity_meter.update_fill(max(0, scorekeeper.get_current_capacity()))
+
+        self.capacity_meter.update_fill(self.saved_passengers)
 
     def _update_info_display(self, scorekeeper: ScoreKeeper) -> None:
         """Refresh the classifier/recommender output label for the current humanoid.
@@ -606,9 +612,11 @@ class UI:
             score = (
                 scorekeeper.get_score()
             )  # scrams remaining passengers; ambulance now empty
-            self.total_saved += score["saved"]
-            self.total_killed += score["killed"]
-            self.total_saved_value += score["saved_value"]
+            self.total_saved = getattr(self, "total_saved", 0) + score["saved"]
+            self.total_killed = getattr(self, "total_killed", 0) + score["killed"]
+            self.total_saved_value = getattr(self, "total_saved_value", 0.0) + score.get(
+                "saved_value", 0.0
+            )
             self.capacity_meter.update_fill(max(0, scorekeeper.get_current_capacity()))
             # Disable buttons before reset() — reset() restores remaining_time to the
             # full shift length, which would fool disable_buttons() into re-enabling them.
@@ -623,7 +631,7 @@ class UI:
             self.game_viewer.display_score(
                 score,
                 end_reason=end_reason,
-                round_num=self.round_num,
+                round_num=getattr(self, "round_num", 1),
                 totals={
                     "saved": self.total_saved,
                     "killed": self.total_killed,
@@ -676,6 +684,7 @@ class UI:
             scorekeeper: ScoreKeeper to reset for the new round.
         """
         self.round_num += 1
+        self.saved_passengers.clear()
         scorekeeper.reset()
         data_parser.reset()
         self.game_viewer.clear_score_display()
