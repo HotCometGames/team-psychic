@@ -225,7 +225,7 @@ class UI:
                     **self._get_log_context(scorekeeper),
                 )
                 scorekeeper.skip(self.humanoid)
-                self.horde_meter.advance(zombie_delta=10, ambulance_delta=5)
+                self.horde_meter.advance(zombie_delta=10, ambulance_delta=10)
                 self.update_ui(scorekeeper)
                 self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -249,7 +249,7 @@ class UI:
                             **self._get_log_context(scorekeeper),
                         )
                         scorekeeper.squish(selected_humanoid)
-                        
+
                         for idx, h in enumerate(self.humanoids):
                             if idx != chosen_index:
                                 self.humanoid = h
@@ -263,8 +263,8 @@ class UI:
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
                         self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
-                        
-                        self.horde_meter.advance(zombie_delta=10, ambulance_delta=10)
+
+                        self.horde_meter.advance(zombie_delta=10, ambulance_delta=15)
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
                             self.button_menu.enable_all()
@@ -281,10 +281,9 @@ class UI:
                         **self._get_log_context(scorekeeper),
                     )
                     scorekeeper.squish(self.humanoid)
+                    self.horde_meter.advance(zombie_delta=10, ambulance_delta=15)
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
-                    self.horde_meter.advance(zombie_delta=10, ambulance_delta=10)
-            
 
 
             def _on_save() -> None:
@@ -307,7 +306,7 @@ class UI:
                         )
                         scorekeeper.save(selected_humanoid)
                         self.saved_passengers.append(selected_humanoid)
-                        
+
                         # 2. Log any unchosen image(s) as skipped
                         for idx, h in enumerate(self.humanoids):
                             if idx != chosen_index:
@@ -322,12 +321,13 @@ class UI:
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
                         self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
-                        
+
+                        self.horde_meter.advance(zombie_delta=10, ambulance_delta=0)
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
                             self.button_menu.enable_all()
                         self.get_next(data_fp, data_parser, scorekeeper)
-                        
+
                     # Inject our selection handler closure into the game viewer
                     self.game_viewer.on_image_selected = handle_choice
                 else:
@@ -338,6 +338,7 @@ class UI:
                     )
                     scorekeeper.save(self.humanoid)
                     self.saved_passengers.append(self.humanoid)
+                    self.horde_meter.advance(zombie_delta=10, ambulance_delta=0)
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -382,8 +383,8 @@ class UI:
         # --- Horde distance meter ---
         self.horde_meter = HordeMeter(
             self.root, w, h,
-            max_distance=100,
-            initial_distance=10,
+            max_distance=200,
+            initial_distance=20,
             zombie_img_path=join(dirname(abspath(__file__)), "graphics", "zombie.png"),
             ambulance_img_path=join(dirname(abspath(__file__)), "graphics", "ambulance.png"),
         )
@@ -611,9 +612,11 @@ class UI:
             score = (
                 scorekeeper.get_score()
             )  # scrams remaining passengers; ambulance now empty
-            self.total_saved += score["saved"]
-            self.total_killed += score["killed"]
-            self.total_saved_value += score["saved_value"]
+            self.total_saved = getattr(self, "total_saved", 0) + score["saved"]
+            self.total_killed = getattr(self, "total_killed", 0) + score["killed"]
+            self.total_saved_value = getattr(self, "total_saved_value", 0.0) + score.get(
+                "saved_value", 0.0
+            )
             self.capacity_meter.update_fill(max(0, scorekeeper.get_current_capacity()))
             # Disable buttons before reset() — reset() restores remaining_time to the
             # full shift length, which would fool disable_buttons() into re-enabling them.
@@ -628,7 +631,7 @@ class UI:
             self.game_viewer.display_score(
                 score,
                 end_reason=end_reason,
-                round_num=self.round_num,
+                round_num=getattr(self, "round_num", 1),
                 totals={
                     "saved": self.total_saved,
                     "killed": self.total_killed,
