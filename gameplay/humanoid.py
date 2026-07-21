@@ -18,26 +18,60 @@ class Humanoid:
         state: Ground-truth state string (one of the :class:`~gameplay.enums.State`
             enum values).
         value: Numeric priority score in [0.0, 1.0]. Assigned by DataParser; higher = higher triage priority.
+        img_class: Raw ``Class`` column from the metadata CSV (e.g.
+            ``"Default"``, ``"Zombie"``) — the value ``state`` was derived
+            from. Kept alongside ``state`` so the log can record the CSV row
+            as-is, not just the game's 4-way state classification.
+        injured: Raw ``Injured`` column from the metadata CSV, normalized to
+            a bool. ``state`` already folds this in (``injured`` + Default ->
+            ``"injured"``), but this preserves the flag on its own.
+        gender: Raw ``Gender`` column from the metadata CSV.
+        item: Raw ``Item`` column from the metadata CSV.
     """
 
     fp: str
     state: str
     role: str
     value: float
+    img_class: str
+    injured: bool
+    gender: str
+    item: str
 
-    def __init__(self, fp: str, state: str, role: str = "civilian", value: float = 0.0) -> None:
+    def __init__(
+        self,
+        fp: str,
+        state: str,
+        role: str = "civilian",
+        value: float = 0.0,
+        img_class: str = "",
+        injured: bool = False,
+        gender: str = "",
+        item: str = "",
+    ) -> None:
         """Initialize a Humanoid.
 
         Args:
             fp: Relative file path to the humanoid's image.
             state: Ground-truth state string (e.g. ``"zombie"``, ``"healthy"``).
             role: Ground-truth role string (e.g. ``"civilian"``, ``"medic"``).
+                Defaults to ``"civilian"`` for callers that don't care about roles.
             value: Numeric priority score in [0.0, 1.0]. Assigned randomly by DataParser; higher = higher triage priority.
+            img_class: Raw ``Class`` column from the metadata CSV. Defaults to
+                ``""`` for callers that construct a Humanoid without CSV context.
+            injured: Raw ``Injured`` column from the metadata CSV. Defaults to
+                ``False``.
+            gender: Raw ``Gender`` column from the metadata CSV. Defaults to ``""``.
+            item: Raw ``Item`` column from the metadata CSV. Defaults to ``""``.
         """
         self.fp = fp
         self.state = state
         self.role = role
         self.value = value
+        self.img_class = img_class
+        self.injured = injured
+        self.gender = gender
+        self.item = item
 
     def is_zombie(self) -> bool:
         """Return True if this humanoid is a zombie."""

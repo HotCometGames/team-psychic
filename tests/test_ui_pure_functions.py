@@ -58,36 +58,6 @@ def test_value_label_text_clamps_out_of_range(value, expected_category):
 
 
 # ---------------------------------------------------------------------------
-# UI._time_to_clock_hands — clock hand positions
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "remaining_time, expected_hour, expected_minute",
-    [
-        (540, 3, 0),  # full shift (9 hours remaining → hour=12-9=3, minute=0)
-        (480, 4, 0),  # 8 hours remaining
-        (60, 11, 0),  # 1 hour remaining → floor(60/60)=1
-        (30, 12, 30),  # <1 hour → floor(30/60)=0, so hour=12, minute=30
-        (1, 12, 59),  # <1 hour → floor(1/60)=0, so hour=12, minute=59
-        (0, 12, 0),  # time up — clamped to 0
-        (-10, 12, 0),  # negative clamped to 0
-    ],
-)
-def test_time_to_clock_hands(remaining_time, expected_hour, expected_minute):
-    """_time_to_clock_hands returns correct (hour, minute) for given remaining time."""
-    hour, minute = UI._time_to_clock_hands(remaining_time)
-    assert hour == expected_hour
-    assert minute == expected_minute
-
-
-def test_time_to_clock_hands_exact_hour_boundary():
-    """remaining_time that is an exact multiple of 60 returns minute=0 (not 60)."""
-    _, minute = UI._time_to_clock_hands(120)
-    assert minute == 0, "minute should be 0 at exact hour boundary, not 60"
-
-
-# ---------------------------------------------------------------------------
 # Regression: game-over buttons stay disabled even when log=True causes reset()
 #
 # Bug: get_next() called disable_buttons() AFTER scorekeeper.reset(), which
@@ -112,7 +82,13 @@ def _make_headless_ui(log: bool = True) -> UI:
     ui.button_menu = MagicMock()
     ui.game_viewer = MagicMock()
     ui.capacity_meter = MagicMock()
+    ui.horde_meter = MagicMock()
     ui.value_label = MagicMock()
+    ui.round_num = 1
+    ui.total_saved = 0
+    ui.total_killed = 0
+    ui.total_saved_value = 0.0
+    ui.total_cured = 0
     return ui
 
 
@@ -124,7 +100,12 @@ def _make_game_over_scorekeeper(remaining_time: int = 0) -> MagicMock:
     """
     sk = MagicMock()
     sk.remaining_time = remaining_time
-    sk.get_score.return_value = {"saved": 0, "killed": 0, "score": 0.0}
+    sk.get_score.return_value = {
+        "saved": 0,
+        "killed": 0,
+        "saved_value": 0.0,
+        "cured": 0,
+    }
     sk.get_current_capacity.return_value = 0
 
     def _reset_side_effect():

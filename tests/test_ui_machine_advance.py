@@ -22,6 +22,7 @@ def _make_ui(classifier=None, recommender=None, humanoid=None) -> UI:
     ui.classifier = classifier if classifier is not None else MagicMock()
     ui.recommender = recommender if recommender is not None else MagicMock()
     ui.humanoid = humanoid if humanoid is not None else MagicMock()
+    ui.horde_meter = MagicMock()
     return ui
 
 

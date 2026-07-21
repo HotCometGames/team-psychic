@@ -13,6 +13,10 @@ import os
 SHIFT_LENGTH: int = 720  # total game time in minutes
 AMBULANCE_CAPACITY: int = 15  # max humanoids the ambulance can hold at once
 
+# Total rounds in a run, win or die each round — placeholder while the
+# roguelike loop is still being built out; raise as more rounds are added.
+MAX_ROUNDS: int = 2
+
 # UI window dimensions
 WINDOW_WIDTH: int = 1280
 WINDOW_HEIGHT: int = 800
@@ -55,10 +59,20 @@ BLOCKED_ACTION_PENALTY: float = -0.5
 CNN_CONFIDENCE_MID: float = 0.5  # below this → low confidence (bin 0)
 CNN_CONFIDENCE_HIGH: float = 0.75  # above this → high confidence (bin 2)
 
+# Horde-distance mechanic (human GUI modes only) — replaces the shift clock
+# as the round's end condition. The horde starts at 0 ft; the ambulance
+# starts HORDE_INITIAL_DISTANCE ft ahead of it and must reach
+# HORDE_MAX_DISTANCE ft (camp) before the horde closes the gap. Action time
+# costs (ActionCost) are unchanged — they still deduct remaining_time for
+# logging/RL purposes, they just no longer end the round.
+# Per-action feet moved each turn live in gameplay/enums.py — HordeDistance.
+HORDE_MAX_DISTANCE: float = 200.0  # ft from horde start (0) to camp
+HORDE_INITIAL_DISTANCE: float = 20.0  # ambulance's starting lead over the horde
+
 # UI color palette — adjust these to restyle the interface.
 UI_COLORS: dict[str, str] = {
     "bg": "#1a1a1a",  # root and canvas background
-    "panel": "#242424",  # widget panels (slightly lighter)
+    "panel": "#242424",  # widget panel backgrounds (slightly lighter)
     "fg": "#f0f0f0",  # default text
     "btn_skip": "#2e4057",  # muted blue — neutral action
     "btn_squish": "#7b2d2d",  # dark red — destructive action

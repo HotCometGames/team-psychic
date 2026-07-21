@@ -34,12 +34,21 @@ class ScoreKeeper:
             ``run_id`` (str), ``log`` (list of action dicts), and ``score``
             (final score dict captured before reset).
         ambulance: Count of each humanoid type currently on board.
+        ambulance_medics: Number of medics currently on board (alive — injured
+            or healthy — subset of ``ambulance["injured"] + ambulance["healthy"]``).
+        ambulance_engineers: Number of engineers currently on board (same
+            alive-subset rule as ``ambulance_medics``).
         score: Cumulative kill/save tallies for the current episode; keys are
-            ``"killed"``, ``"saved"``, and ``"saved_value"`` (float — cumulative
-            value delivered to hospital, post-scram, zombie-free).
+            ``"killed"``, ``"saved"``, ``"saved_value"`` (float — cumulative
+            value delivered to hospital, post-scram, zombie-free),
+            ``"injured_saved"`` (int — saved this episode who are still injured
+            and not yet cured), and ``"cured"`` (int — injured survivors healed
+            by a doctor at the camp screen via :meth:`cure_injured`).
         squished: Total number of squish actions taken this episode.
         remaining_time: Minutes left in the current shift.
         ambulance_value: Running sum of the values of humanoids currently on the ambulance.
+        medics_saved: Number of medics successfully delivered to the hospital
+            this episode. Each one grants 2 cure charges at the camp screen.
     """
 
     shift_length: int
@@ -50,10 +59,13 @@ class ScoreKeeper:
     logger: list[dict[str, Any]]
     all_logs: list[dict[str, Any]]
     ambulance: dict[str, int]
+    ambulance_medics: int
+    ambulance_engineers: int
     score: dict[str, int | float]
     squished: int
     remaining_time: int
     ambulance_value: float
+    medics_saved: int
 
     def __init__(
         self, shift_length: int, capacity: int, seed: int | None = None
@@ -103,15 +115,20 @@ class ScoreKeeper:
             self.current_run_id = str(uuid.uuid4())
 
         self.ambulance = {"zombie": 0, "injured": 0, "healthy": 0, "corpse": 0}
+        self.ambulance_medics = 0
+        self.ambulance_engineers = 0
         self.ambulance_value = 0.0
         self.score = {
             "killed": 0,
             "saved": 0,
             "saved_value": 0.0,
+            "injured_saved": 0,
+            "cured": 0,
         }
         self.squished = 0
         self.remaining_time = int(self.shift_length)  # minutes
         self.logger = []
+        self.medics_saved = 0
 
     def log_turn(
         self,
@@ -121,6 +138,8 @@ class ScoreKeeper:
         recommended_action: str | None = None,
         confidence: str | None = None,
         obs: list[float] | None = None,
+        zombie_distance: float | None = None,
+        ambulance_distance: float | None = None,
     ) -> None:
         """Append an action entry to the current episode log.
 
@@ -145,12 +164,31 @@ class ScoreKeeper:
             obs: Raw 15-float RL observation vector (pre-action) as a Python
                 list, or ``None`` if not available (e.g. human UI modes).
                 Stored as a JSON array string in the log for RL debugging.
+            zombie_distance: Horde's position in feet at the moment this
+                decision was made (from ``HordeMeter``), or ``None`` if the
+                horde meter isn't in play (e.g. headless/auto mode).
+            ambulance_distance: Ambulance's position in feet at the moment
+                this decision was made, or ``None`` if not applicable.
         """
+        distance_to_horde = (
+            ambulance_distance - zombie_distance
+            if ambulance_distance is not None and zombie_distance is not None
+            else None
+        )
         self.logger.append(
             {
+                # Raw metadata-CSV fields for this humanoid (class/injured/
+                # gender/item/role), not just the derived 4-way state — lets
+                # the log stand on its own without cross-referencing the
+                # original dataset CSV.
                 "humanoid_ground_truth": (
                     humanoid.state if humanoid is not None else None
                 ),
+                "humanoid_class": humanoid.img_class if humanoid is not None else None,
+                "humanoid_injured": humanoid.injured if humanoid is not None else None,
+                "humanoid_gender": humanoid.gender if humanoid is not None else None,
+                "humanoid_item": humanoid.item if humanoid is not None else None,
+                "humanoid_role": humanoid.role if humanoid is not None else None,
                 "humanoid_predicted_class": predicted_class,
                 "recommended_action": recommended_action,
                 "confidence": confidence,
@@ -163,7 +201,17 @@ class ScoreKeeper:
                 "amb_injured": self.ambulance["injured"],
                 "amb_healthy": self.ambulance["healthy"],
                 "amb_corpse": self.ambulance["corpse"],
+                # "Extra" ambulance-composition snapshot, pre-action (same
+                # timing as capacity/amb_* above) — total occupants plus the
+                # doctor/engineer headcounts used by the cure/(future) speed
+                # mechanics.
+                "amb_total": self.get_current_capacity(),
+                "amb_medics": self.ambulance_medics,
+                "amb_engineers": self.ambulance_engineers,
                 "obs_json": json.dumps(obs) if obs is not None else None,
+                "zombie_distance": zombie_distance,
+                "ambulance_distance": ambulance_distance,
+                "distance_to_horde": distance_to_horde,
             }
         )
 
@@ -265,6 +313,10 @@ class ScoreKeeper:
             self.ambulance["healthy"] += 1
         if humanoid.is_injured() or humanoid.is_healthy():
             self.ambulance_value += humanoid.value
+            if humanoid.is_medic():
+                self.ambulance_medics += 1
+            if humanoid.is_engineer():
+                self.ambulance_engineers += 1
 
     def squish(self, humanoid: Humanoid) -> None:
         """Squish a humanoid (destroy in place).
@@ -331,11 +383,15 @@ class ScoreKeeper:
         else:
             self.score["saved"] += self.ambulance["injured"] + self.ambulance["healthy"]
             self.score["saved_value"] += self.ambulance_value
+            self.score["injured_saved"] += self.ambulance["injured"]
+            self.medics_saved += self.ambulance_medics
 
         self.ambulance["zombie"] = 0
         self.ambulance["injured"] = 0
         self.ambulance["healthy"] = 0
         self.ambulance["corpse"] = 0
+        self.ambulance_medics = 0
+        self.ambulance_engineers = 0
         self.ambulance_value = 0.0
 
     def available_action_space(self) -> list[bool]:
@@ -454,6 +510,30 @@ class ScoreKeeper:
             ``True`` if occupied slots >= ``capacity``.
         """
         return sum(self.ambulance.values()) >= self.capacity
+
+    def cure_injured(self) -> int:
+        """Apply doctor cures to this episode's injured survivors — call at camp.
+
+        Each medic delivered to the hospital this episode (``medics_saved``)
+        grants 2 cure charges. Cures are capped by both that capacity and the
+        number of injured survivors still uncured (``score["injured_saved"]``).
+        Cured survivors move from ``"injured_saved"`` to ``"cured"`` — they were
+        already counted in ``"saved"``/``"saved_value"`` when the ambulance
+        reached the hospital, so this only affects the injured/cured breakdown
+        shown on the camp screen, not the total saved count.
+
+        Call once per round, after :meth:`get_score` finalizes any in-flight
+        passengers and before :meth:`reset` clears ``medics_saved`` for the
+        next round.
+
+        Returns:
+            Number of injured survivors cured by this call.
+        """
+        cure_capacity = 2 * self.medics_saved
+        cured_now = min(cure_capacity, self.score["injured_saved"])
+        self.score["injured_saved"] -= cured_now
+        self.score["cured"] += cured_now
+        return cured_now
 
     def get_score(self) -> dict[str, int | float]:
         """Return the final score, scramming first if passengers remain.

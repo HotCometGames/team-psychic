@@ -41,7 +41,6 @@ import logging
 import math
 import tkinter as tk
 from os.path import abspath, dirname, join
-from typing import Any
 
 
 import numpy as np
@@ -52,28 +51,24 @@ from gameplay.constants import (
     AMBULANCE_CAPACITY,
     CNN_CONFIDENCE_HIGH,
     CNN_CONFIDENCE_MID,
-    LEGACY_CLOCK,
+    HORDE_INITIAL_DISTANCE,
+    HORDE_MAX_DISTANCE,
+    MAX_ROUNDS,
     UI_COLORS,
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
 )
-from gameplay.enums import ActionCost, HordeDistance
+from gameplay.enums import HordeDistance
 from gameplay.humanoid import Humanoid
 from gameplay.scorekeeper import ScoreKeeper
 from models.ActionRecommender import ActionRecommender
 from models.HumanoidClassifier import HumanoidClassifier, probs_to_class
 from ui.button_menu import ButtonMenu
 from ui.capacity_meter import CapacityMeter
-from ui.clock import Clock
-from ui.digital_clock import DigitalClock
 from ui.game_viewer import GameViewer
 
 from random import random
 from ui.horde_meter import HordeMeter
-
-# Feature flag: swap clock implementations by changing LEGACY_CLOCK in gameplay/constants.py.
-# This is a teaching example of the feature-flag pattern — see constants.py for details.
-_ClockClass = Clock if LEGACY_CLOCK else DigitalClock
 
 
 class UI:
@@ -109,8 +104,10 @@ class UI:
         humanoid: The humanoid currently on screen.
         button_menu: Action button row widget.
         game_viewer: Central photo panel widget.
-        clock: Clock widget (analog or digital, per ``LEGACY_CLOCK``).
         capacity_meter: Ambulance capacity meter widget.
+        horde_meter: Ambulance-vs-horde distance meter — the round ends when
+            the horde catches the ambulance (caught) or the ambulance reaches
+            camp (round complete), replacing the old shift-clock end condition.
         value_label: Label displaying the current humanoid's value and category.
     """
 
@@ -124,11 +121,12 @@ class UI:
     total_saved: int
     total_killed: int
     total_saved_value: float
+    total_cured: int
     humanoid: Humanoid
     button_menu: ButtonMenu
     game_viewer: GameViewer
-    clock: Any  # Clock | DigitalClock
     capacity_meter: CapacityMeter
+    horde_meter: HordeMeter
     value_label: tk.Label
     _info_label: tk.Label | None
     _last_probs: "np.ndarray | None"
@@ -202,6 +200,7 @@ class UI:
         self.total_saved = 0
         self.total_killed = 0
         self.total_saved_value = 0.0
+        self.total_cured = 0
         self.saved_passengers = []
         self.humanoid = data_parser.get_random()
         self.humanoids = [self.humanoid]
@@ -225,29 +224,27 @@ class UI:
                     **self._get_log_context(scorekeeper),
                 )
                 scorekeeper.skip(self.humanoid)
-
                 self.horde_meter.advance(
                     zombie_delta=HordeDistance.ZOMBIE.value,
                     ambulance_delta=HordeDistance.SKIP.value,
                 )
-
                 self.update_ui(scorekeeper)
                 self.get_next(data_fp, data_parser, scorekeeper)
 
             def _on_squish() -> None:
                 self.button_menu.disable_all()
-                
+
                 if len(self.humanoids) > 1:
                     # Prompt the user to select an image by clicking it
                     self.value_label.config(text="SELECT: Click the image you want to SQUISH")
-                    
+
                     def handle_choice(chosen_index: int) -> None:
                         # Grab the targeted humanoid from the active list
                         selected_humanoid = self.humanoids[chosen_index]
-                        
+
                         # Temporarily swap self.humanoid context for accurate logging calculations
                         self.humanoid = selected_humanoid
-                        
+
                         scorekeeper.log_turn(
                             selected_humanoid,
                             "squish",
@@ -255,7 +252,7 @@ class UI:
                         )
                         scorekeeper.squish(selected_humanoid)
 
-
+                        # Log any unchosen image(s) as skipped
                         for idx, h in enumerate(self.humanoids):
                             if idx != chosen_index:
                                 self.humanoid = h
@@ -266,16 +263,14 @@ class UI:
                                 )
                                 scorekeeper.skip(h)
 
-
-                        # Clear the selection listener callback so it doesn't fire unexpectedly later
-                        self.humanoid = selected_humanoid
-                        self.game_viewer.on_image_selected = None
-
-
                         self.horde_meter.advance(
                             zombie_delta=HordeDistance.ZOMBIE.value,
                             ambulance_delta=HordeDistance.SQUISH.value,
                         )
+
+                        # Clear the selection listener callback so it doesn't fire unexpectedly later
+                        self.humanoid = selected_humanoid
+                        self.game_viewer.on_image_selected = None
 
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
@@ -291,39 +286,35 @@ class UI:
                         **self._get_log_context(scorekeeper),
                     )
                     scorekeeper.squish(self.humanoid)
-
                     self.horde_meter.advance(
                         zombie_delta=HordeDistance.ZOMBIE.value,
                         ambulance_delta=HordeDistance.SQUISH.value,
                     )
-
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
-
 
             def _on_save() -> None:
                 self.button_menu.disable_all()
 
                 if len(self.humanoids) > 1:
                     self.value_label.config(text="SELECT: Click the image you want to SAVE")
-                    
+
                     def handle_choice(chosen_index: int) -> None:
                         # Grab the targeted humanoid from the active list
                         selected_humanoid = self.humanoids[chosen_index]
-                        
+
                         # Temporarily swap self.humanoid context for accurate logging calculations
                         self.humanoid = selected_humanoid
-                        
+
                         scorekeeper.log_turn(
                             selected_humanoid,
                             "save",
                             **self._get_log_context(scorekeeper),
                         )
                         scorekeeper.save(selected_humanoid)
-
                         self.saved_passengers.append(selected_humanoid)
 
-                        # 2. Log any unchosen image(s) as skipped
+                        # Log any unchosen image(s) as skipped
                         for idx, h in enumerate(self.humanoids):
                             if idx != chosen_index:
                                 self.humanoid = h
@@ -334,16 +325,14 @@ class UI:
                                 )
                                 scorekeeper.skip(h)
 
+                        self.horde_meter.advance(
+                            zombie_delta=HordeDistance.ZOMBIE.value,
+                            ambulance_delta=HordeDistance.SAVE.value,
+                        )
 
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
                         self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
-
-
-                        self.horde_meter.advance(
-                        zombie_delta=HordeDistance.ZOMBIE.value,
-                        ambulance_delta=HordeDistance.SAVE.value,
-                    )
 
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
@@ -364,7 +353,6 @@ class UI:
                         zombie_delta=HordeDistance.ZOMBIE.value,
                         ambulance_delta=HordeDistance.SAVE.value,
                     )
-
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -376,6 +364,11 @@ class UI:
                     **self._get_log_context(scorekeeper),
                 )
                 scorekeeper.scram(self.humanoid)
+                # No HordeDistance member for scram yet (not currently a button) —
+                # a big ambulance jump matches what scram represents (driving away).
+                self.horde_meter.advance(
+                    zombie_delta=HordeDistance.ZOMBIE.value, ambulance_delta=40
+                )
                 self.update_ui(scorekeeper)
                 self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -388,7 +381,6 @@ class UI:
 
         # Validate initial button state against live game conditions.
         self.button_menu.disable_buttons(
-            scorekeeper.remaining_time,
             len(data_parser.unvisited),
             scorekeeper.at_capacity(),
         )
@@ -397,20 +389,15 @@ class UI:
         self.game_viewer = GameViewer(self.root, w, h, data_fp, self.humanoid)
         self.root.bind("<Delete>", self.game_viewer.delete_photo)
 
-        # --- Clock ---
-        initial_hour, initial_minute = self._time_to_clock_hands(
-            scorekeeper.remaining_time
-        )
-        self.clock = _ClockClass(self.root, w, h, initial_hour, initial_minute)
-
         # --- Ambulance capacity meter ---
         self.capacity_meter = CapacityMeter(self.root, w, h, AMBULANCE_CAPACITY)
-        
-        # --- Horde distance meter ---
+
+        # --- Horde distance meter — replaces the shift clock as the round's
+        # --- end condition (see get_next() and _start_next_round()).
         self.horde_meter = HordeMeter(
             self.root, w, h,
-            max_distance=200,
-            initial_distance=20,
+            max_distance=HORDE_MAX_DISTANCE,
+            initial_distance=HORDE_INITIAL_DISTANCE,
             zombie_img_path=join(dirname(abspath(__file__)), "graphics", "zombie.png"),
             ambulance_img_path=join(dirname(abspath(__file__)), "graphics", "ambulance.png"),
         )
@@ -510,6 +497,8 @@ class UI:
                 recommended_action=action.value,
                 confidence=confidence,
                 obs=None,
+                zombie_distance=self.horde_meter.zombie_distance,
+                ambulance_distance=self.horde_meter.ambulance_distance,
             )
             self.update_ui(scorekeeper)
             self.get_next(data_fp, data_parser, scorekeeper)
@@ -539,8 +528,12 @@ class UI:
             scorekeeper: ScoreKeeper passed to the recommender for context.
 
         Returns:
-            Dict with ``predicted_class`` (``int | None``) and
-            ``recommended_action`` (``str | None``).
+            Dict with ``predicted_class`` (``int | None``),
+            ``recommended_action`` (``str | None``), ``confidence``, ``obs``,
+            and the horde meter's current ``zombie_distance``/
+            ``ambulance_distance`` — the position of each at the moment this
+            decision was made, before this turn's ``horde_meter.advance()``
+            call moves them.
         """
         h = target_humanoid if target_humanoid is not None else self.humanoid
 
@@ -572,17 +565,16 @@ class UI:
             "recommended_action": recommended_action,
             "confidence": confidence,
             "obs": None,
+            "zombie_distance": self.horde_meter.zombie_distance,
+            "ambulance_distance": self.horde_meter.ambulance_distance,
         }
 
     def update_ui(self, scorekeeper: ScoreKeeper) -> None:
-        """Update the clock and capacity meter to reflect current game state.
+        """Update the capacity meter to reflect current game state.
 
         Args:
-            scorekeeper: ScoreKeeper with updated time and ambulance state.
+            scorekeeper: ScoreKeeper with updated ambulance state.
         """
-        hour, minute = self._time_to_clock_hands(scorekeeper.remaining_time)
-        self.clock.update_time(hour, minute)
-
         self.capacity_meter.update_fill(self.saved_passengers)
 
     def _update_info_display(self, scorekeeper: ScoreKeeper) -> None:
@@ -639,20 +631,27 @@ class UI:
             data_parser: DataParser supplying the remaining humanoids.
             scorekeeper: ScoreKeeper tracking game state.
         """
-        if len(data_parser.unvisited) == 0 or scorekeeper.remaining_time <= 0:
+        if (
+            len(data_parser.unvisited) == 0
+            or self.horde_meter.is_caught()
+            or self.horde_meter.reached_camp()
+        ):
             self.game_viewer.delete_photo(None)
-            end_reason = (
-                "Time's Up" if scorekeeper.remaining_time <= 0 else "The City Is Empty"
-            )
+            # Binary framing per round, regardless of how it ended: caught by
+            # the horde is a death; reaching camp or running out of humanoids
+            # to process both count as living. Either way, play continues on
+            # to the next round (until MAX_ROUNDS ends the run below).
+            end_reason = "You Died" if self.horde_meter.is_caught() else "You Lived"
             score = (
                 scorekeeper.get_score()
             )  # scrams remaining passengers; ambulance now empty
-            self.total_saved = getattr(self, "total_saved", 0) + score["saved"]
-            self.total_killed = getattr(self, "total_killed", 0) + score["killed"]
-            self.total_saved_value = getattr(self, "total_saved_value", 0.0) + score.get(
-                "saved_value", 0.0
-            )
-            self.capacity_meter.update_fill(max(0, scorekeeper.get_current_capacity()))
+            # Doctors cure at camp, before reset() clears medics_saved for the next round.
+            scorekeeper.cure_injured()
+            self.total_saved += score["saved"]
+            self.total_killed += score["killed"]
+            self.total_saved_value += score["saved_value"]
+            self.total_cured += score["cured"]
+            self.capacity_meter.update_fill(self.saved_passengers)
             # Disable buttons before reset() — reset() restores remaining_time to the
             # full shift length, which would fool disable_buttons() into re-enabling them.
             self.button_menu.disable_all()
@@ -660,8 +659,16 @@ class UI:
                 scorekeeper.reset()  # commit episode to all_logs before writing
                 scorekeeper.save_log()
 
-            def _on_continue() -> None:
-                self._start_next_round(data_fp, data_parser, scorekeeper)
+            # No more rounds left in this run — omit the continue button so
+            # display_score() shows a run-complete screen instead.
+            is_final_round = self.round_num >= MAX_ROUNDS
+            on_continue = None
+            if not is_final_round:
+
+                def _on_continue() -> None:
+                    self._start_next_round(data_fp, data_parser, scorekeeper)
+
+                on_continue = _on_continue
 
             self.game_viewer.display_score(
                 score,
@@ -671,8 +678,9 @@ class UI:
                     "saved": self.total_saved,
                     "killed": self.total_killed,
                     "saved_value": self.total_saved_value,
+                    "cured": self.total_cured,
                 },
-                on_continue=_on_continue,
+                on_continue=on_continue,
             )
         else:
             show_two = random() < 0.20
@@ -680,7 +688,7 @@ class UI:
             self.humanoids = [data_parser.get_random()]
             if show_two and data_parser.unvisited:
                  self.humanoids.append(data_parser.get_random())
-                
+
             self.humanoid = self.humanoids[0]
             self._last_probs = (
                 None  # invalidate cache — new humanoid, old probs are stale
@@ -694,7 +702,6 @@ class UI:
             self._update_info_display(scorekeeper)
             self.value_label.config(text=self._value_label_text(self.humanoid.value))
             self.button_menu.disable_buttons(
-                scorekeeper.remaining_time,
                 len(data_parser.unvisited),
                 scorekeeper.at_capacity(),
             )
@@ -722,6 +729,7 @@ class UI:
         self.saved_passengers.clear()
         scorekeeper.reset()
         data_parser.reset()
+        self.horde_meter.reset()
         self.game_viewer.clear_score_display()
 
         self.humanoids = [data_parser.get_random()]
@@ -734,7 +742,6 @@ class UI:
         self.value_label.config(text=self._value_label_text(self.humanoid.value))
         self.update_ui(scorekeeper)
         self.button_menu.disable_buttons(
-            scorekeeper.remaining_time,
             len(data_parser.unvisited),
             scorekeeper.at_capacity(),
         )
@@ -756,23 +763,6 @@ class UI:
         clamped = max(0.0, min(1.0, value))
         bin_idx = min(int(clamped * 5), 4)
         return f"Value: {value:.2f} / {categories[bin_idx]}"
-
-    @staticmethod
-    def _time_to_clock_hands(remaining_time: int) -> tuple[int, int]:
-        """Convert remaining game time to (hour, minute) clock hand positions.
-
-        Args:
-            remaining_time: Minutes remaining. Clamped to 0 if negative.
-
-        Returns:
-            Tuple of ``(hour, minute)`` for the clock display.
-        """
-        clamped = max(0, remaining_time)
-        hour = 12 - math.floor(clamped / 60.0)
-        # Outer % 60 is load-bearing: when remaining_time is an exact multiple of 60,
-        # (60 - 0) = 60 which is an invalid minute value. % 60 maps it back to 0.
-        minute = (60 - (clamped % 60)) % 60
-        return hour, minute
 
     def _create_header(self, w: int) -> None:
         """Place game and BWSI logos across the top of the window.
