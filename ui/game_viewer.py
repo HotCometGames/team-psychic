@@ -46,6 +46,10 @@ class GameViewer:
             humanoid: Initial :class:`~gameplay.humanoid.Humanoid` whose image
                 is displayed on creation.
         """
+        self._root = root
+        self._w = w
+        self._h = h
+
         self.canvas = tk.Canvas(
             root,
             width=math.floor(0.5 * w),
@@ -232,9 +236,25 @@ class GameViewer:
         # A single outer Frame holds the whole screen — destroying it in
         # clear_score_display() takes every child down with it, so nothing
         # below needs to be tracked individually.
-        outer = tk.Frame(self.canvas, bg=UI_COLORS["panel"])
+        #
+        # Placed directly on root (not self.canvas) and sized to nearly fill
+        # the whole window — this is a full takeover screen, not just a
+        # panel inside the humanoid-photo canvas.
+        margin = 20
+        outer = tk.Frame(
+            self._root,
+            bg=UI_COLORS["panel"],
+            highlightbackground=UI_COLORS["card_border"],
+            highlightthickness=1,
+        )
         self._score_widgets.append(outer)
-        outer.pack(anchor=tk.NW, padx=28, pady=24, fill=tk.BOTH)
+        outer.place(
+            x=margin,
+            y=margin,
+            width=self._w - 2 * margin,
+            height=self._h - 2 * margin,
+        )
+        outer.lift()
 
         if end_reason:
             tk.Label(
