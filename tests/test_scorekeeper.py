@@ -664,6 +664,11 @@ def test_get_score_has_saved_value_key():
 
 LOG_COLUMNS = {
     "humanoid_ground_truth",
+    "humanoid_class",
+    "humanoid_injured",
+    "humanoid_gender",
+    "humanoid_item",
+    "humanoid_role",
     "humanoid_predicted_class",
     "recommended_action",
     "confidence",
@@ -676,7 +681,13 @@ LOG_COLUMNS = {
     "amb_injured",
     "amb_healthy",
     "amb_corpse",
+    "amb_total",
+    "amb_medics",
+    "amb_engineers",
     "obs_json",
+    "zombie_distance",
+    "ambulance_distance",
+    "distance_to_horde",
     "run_id",
 }
 SUMMARY_COLUMNS = {

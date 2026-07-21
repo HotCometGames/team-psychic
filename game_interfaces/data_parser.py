@@ -102,8 +102,52 @@ class DataParser:
                 "Check the metadata CSV for missing or non-string filenames."
             )
         value = datarow_to_value(data_row, rng=self.rng)
-        humanoid = Humanoid(fp=filename, state=state, role=role, value=value)
+
+        # Raw CSV fields, kept on the Humanoid alongside the derived `state`
+        # so per-turn logging can record the row as-is (class/injured/gender/
+        # item), not just the game's 4-way state classification. Gender/Item
+        # use .get() (not direct indexing) — unlike Class/Injured/Role/Filename
+        # they're descriptive, not load-bearing, so a dataset or test fixture
+        # missing those columns shouldn't hard-fail the draw.
+        img_class = str(data_row["Class"]).strip()
+        injured = _parse_injured_flag(data_row)
+        gender = data_row.get("Gender", "")
+        item = data_row.get("Item", "")
+
+        humanoid = Humanoid(
+            fp=filename,
+            state=state,
+            role=role,
+            value=value,
+            img_class=img_class,
+            injured=injured,
+            gender=str(gender) if pd.notna(gender) else "",
+            item=str(item) if pd.notna(item) else "",
+        )
         return humanoid
+
+
+def _parse_injured_flag(data_row: pd.Series) -> bool:
+    """Normalize the ``Injured`` CSV column to a reliable bool.
+
+    pandas may read this column as a real bool, an int (1/0), or a string
+    ("True"/"False") depending on how the CSV was produced. A bare
+    ``if img_injured:`` is wrong for string values — ``"False"`` is truthy.
+    NaN is treated as not-injured (all three conditions evaluate to False).
+
+    Args:
+        data_row: A pandas Series (one row of the metadata dataframe) with
+            an ``Injured`` column.
+
+    Returns:
+        True if the row is flagged as injured.
+    """
+    img_injured = data_row["Injured"]
+    return (
+        img_injured is True
+        or str(img_injured).strip().lower() == "true"
+        or img_injured == 1
+    )
 
 
 # can be customized
@@ -127,19 +171,10 @@ def datarow_to_state(data_row: pd.Series) -> str:
         ``"zombie"``, or ``"corpse"``.
     """
     img_class = str(data_row["Class"]).strip()
-    img_injured = data_row["Injured"]
+    injured = _parse_injured_flag(data_row)
     # Extension point: uncomment and use these columns to customize state mapping.
     # img_gender = data_row['Gender']
     # img_item = data_row['Item']
-    # Normalize the Injured column to a reliable bool regardless of how the CSV
-    # was produced. pandas may read it as bool, int (1/0), or string ("True"/"False").
-    # A bare `if img_injured:` is wrong for string values — "False" is truthy.
-    # NaN is treated as not-injured (all three conditions evaluate to False for NaN).
-    injured = (
-        img_injured is True
-        or str(img_injured).strip().lower() == "true"
-        or img_injured == 1
-    )
     if img_class == "Default":
         state = State.HEALTHY.value
         if injured:

@@ -13,6 +13,7 @@ _ICON_CAMP = "\U0001F3D5"  # camping tent
 _ICON_KILLED = "\U0001F480"  # skull
 _ICON_SAVED = "❤"  # heart
 _ICON_VALUE = "⭐"  # star
+_ICON_CURED = "\U0001FA79"  # bandage — injured survivors healed by a doctor
 _ICON_CONTINUE = "➡"  # arrow
 
 
@@ -80,12 +81,12 @@ class GameViewer:
     def create_photos(self, file_paths: list[str]) -> None:
         """Load a list of images from disk and display them side-by-side.
 
-        Replaces any existing photos. Automatically divides the canvas width 
+        Replaces any existing photos. Automatically divides the canvas width
         equally among all images provided.
         """
         self.canvas.delete("photo")
         self.canvas.delete("indicator")
-        
+
         # Re-arm mouse listeners for new choices
         self.canvas.bind("<Motion>", self._on_canvas_hover)
         self.canvas.bind("<Leave>", self._on_canvas_leave)
@@ -103,23 +104,23 @@ class GameViewer:
         target_w = math.floor(canvas_w / num_images)
 
         target_w = math.floor(canvas_w / num_images)
-        
+
         for i, fp in enumerate(file_paths):
             # Calculate the horizontal offset for each image
             x_offset = i * target_w
-            
+
             # Load and resize image to fit its fractional slice
             photo = self._get_photo(fp, target_w, canvas_h)
             self.photos.append(photo)
-            
+
             img_h = photo.height()
             y_offset = max(0, math.floor((canvas_h - img_h) / 2))
 
-            # Place onto the canvas canvas 
+            # Place onto the canvas canvas
             self.canvas.create_image(
-                x_offset, y_offset,  
-                anchor=tk.NW, 
-                image=photo, 
+                x_offset, y_offset,
+                anchor=tk.NW,
+                image=photo,
                 tags=("photo", f"idx_{i}")
             )
 
@@ -143,7 +144,7 @@ class GameViewer:
             canvas_w = self.canvas.winfo_width()
             slice_w = canvas_w / num_images
             clicked_idx = int(event.x // slice_w)
-            
+
             if 0 <= clicked_idx < num_images:
                 # Draw a permanent red outline around the final selected choice
                 self.canvas.delete("indicator")
@@ -153,11 +154,11 @@ class GameViewer:
                     (clicked_idx + 1) * slice_w, canvas_h,
                     outline="red", width=4, tags="photo"
                 )
-                
+
                 # Unbind temporary hover indicators so they stop moving
                 self.canvas.unbind("<Motion>")
                 self.canvas.unbind("<Leave>")
-                
+
                 # Execute the UI action callback switch
                 self.on_image_selected(clicked_idx)
 
@@ -165,16 +166,16 @@ class GameViewer:
         """Draws a real-time red selection box outline following the cursor layout."""
         if not self.on_image_selected:
             return
-                
+
         num_images = len(self.current_paths)
         if num_images <= 1:
             return
-                
+
         canvas_w = self.canvas.winfo_width()
         canvas_h = self.canvas.winfo_height()
         slice_w = canvas_w / num_images
         hovered_idx = int(event.x // slice_w)
-            
+
         self.canvas.delete("indicator")
         if 0 <= hovered_idx < num_images:
             self.canvas.create_rectangle(
@@ -214,8 +215,9 @@ class GameViewer:
                 ``"saved_value"`` float (total value of saved humanoids) for
                 *this round only*, as returned by
                 :meth:`~gameplay.scorekeeper.ScoreKeeper.get_score`.
-            end_reason: Optional end-of-round reason string (e.g. ``"Time's Up"``
-                or ``"The City Is Empty"``). Displayed as a bold header if provided.
+            end_reason: Optional end-of-round reason string (``"You Died"`` if
+                the horde caught the ambulance, ``"You Lived"`` otherwise).
+                Displayed as a bold header if provided.
             round_num: Optional round number to display (e.g. ``"ROUND 1 COMPLETE"``).
                 Omit for a generic ``"CAMP"`` header.
             totals: Optional dict with the same shape as ``score`` but summed
@@ -278,6 +280,16 @@ class GameViewer:
                 pady=10,
                 command=on_continue,
             ).pack(anchor=tk.W, pady=(24, 0))
+        else:
+            # No on_continue means no rounds remain (MAX_ROUNDS reached) —
+            # say so explicitly rather than leaving the screen looking stuck.
+            tk.Label(
+                outer,
+                text="RUN COMPLETE — thanks for playing!",
+                font=("Arial", 15, "bold"),
+                bg=UI_COLORS["panel"],
+                fg=UI_COLORS["accent"],
+            ).pack(anchor=tk.W, pady=(24, 0))
 
     @staticmethod
     def _build_stat_card(
@@ -322,6 +334,7 @@ class GameViewer:
                 "Value {0:.4f}".format(stats["saved_value"]),
                 UI_COLORS["fg"],
             ),
+            (_ICON_CURED, "Cured {}".format(stats["cured"]), UI_COLORS["fg"]),
         ]
         for icon, text, color in rows:
             tk.Label(
@@ -346,16 +359,16 @@ class GameViewer:
         """
         with Image.open(img_path) as img:
             orig_w, orig_h = img.size
-            
+
             # Calculate aspect ratios
             ratio_w = max_w / orig_w
             ratio_h = max_h / orig_h
-            
+
             # Use the smaller scaling factor to ensure it fits without stretching
             scale = min(ratio_w, ratio_h)
-            
+
             new_w = int(orig_w * scale)
             new_h = int(orig_h * scale)
-            
+
             tk_img = ImageTk.PhotoImage(img.resize((new_w, new_h), Image.LANCZOS))
         return tk_img

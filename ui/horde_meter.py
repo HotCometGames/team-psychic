@@ -72,6 +72,7 @@ class HordeMeter:
         """
         self.root = root
         self.max_distance = max_distance
+        self._initial_distance = initial_distance
 
         # --- Layout: bar sits near the bottom of the window ---
         self._bar_x0 = math.floor(0.08 * w)
@@ -179,17 +180,21 @@ class HordeMeter:
             outline="#888888",
             width=1,
         )
+        # fill= is load-bearing here — Tk's text-item default color is black,
+        # which is invisible against this app's near-black background.
         self.canvas.create_text(
             self._bar_x0,
             self._bar_y_local - self._icon_size // 2 - 14,
             text="Horde",
             font=("Arial", 10),
+            fill=UI_COLORS["fg"],
         )
         self.canvas.create_text(
             self._bar_x1,
             self._bar_y_local - self._icon_size // 2 - 14,
             text="Camp",
             font=("Arial", 10),
+            fill=UI_COLORS["fg"],
         )
 
     def _draw_icon_at(
@@ -254,6 +259,34 @@ class HordeMeter:
         )
         self._redraw()
 
+    @property
+    def zombie_distance(self) -> float:
+        """Horde's current position in feet from the start of the bar."""
+        return self._zombie_distance
+
+    @property
+    def ambulance_distance(self) -> float:
+        """Ambulance's current position in feet from the start of the bar."""
+        return self._ambulance_distance
+
+    def is_caught(self) -> bool:
+        """Return True once the horde has reached or passed the ambulance."""
+        return self._zombie_distance >= self._ambulance_distance
+
+    def reached_camp(self) -> bool:
+        """Return True once the ambulance has reached max_distance (camp)."""
+        return self._ambulance_distance >= self.max_distance
+
+    def reset(self) -> None:
+        """Reset both positions for a new round.
+
+        The horde goes back to 0 ft; the ambulance goes back to its starting
+        lead (the ``initial_distance`` passed to ``__init__``).
+        """
+        self._zombie_distance = 0.0
+        self._ambulance_distance = self._initial_distance
+        self._redraw()
+
     def _redraw(self) -> None:
         """Redraw the zombie icon, the ambulance icon + label, and the side gap label."""
         if self._zombie_icon_id is not None:
@@ -276,6 +309,7 @@ class HordeMeter:
             self._bar_y_local - self._icon_size // 2 - 10,
             text=f"{max(0.0, min(self.max_distance, self._ambulance_distance)):.0f} ft",
             font=("Arial", 11, "bold"),
+            fill=UI_COLORS["fg"],
         )
 
         gap = self._ambulance_distance - self._zombie_distance

@@ -37,7 +37,7 @@ class ButtonMenu:
         Args:
             root: Tkinter parent widget.
             items: List of ``(display_text, callback)`` pairs. Display text
-                may include a cost suffix (e.g. ``"Save [-30 min]"``); the
+                may include a distance suffix (e.g. ``"Save [+8 ft]"``); the
                 base name is extracted for dict keying.
         """
         # height=80 is sized for up to 4 buttons (each ~20px). Adding more buttons
@@ -66,23 +66,23 @@ class ButtonMenu:
 
     def disable_buttons(
         self,
-        remaining_time: int,
         remaining_humanoids: int,
         at_capacity: bool,
     ) -> None:
         """Enable or disable buttons based on current game state.
 
-        All buttons are disabled at game-over (time or humanoids exhausted).
+        All buttons are disabled at game-over (humanoids exhausted). The
+        round-clock condition was removed — rounds now end via the horde
+        distance meter (see ``ui.py`` ``get_next()``), not remaining_time.
         During active play, Save is disabled when the ambulance is full;
         all other buttons remain available.
 
         Args:
-            remaining_time: Minutes left in the shift.
             remaining_humanoids: Number of unvisited humanoids remaining.
             at_capacity: Whether the ambulance is currently full.
         """
         # Game over: disable all buttons.
-        if remaining_humanoids == 0 or remaining_time <= 0:
+        if remaining_humanoids == 0:
             for btn in self.buttons.values():
                 btn.config(state="disabled")
             return
@@ -105,8 +105,8 @@ class ButtonMenu:
 
         Args:
             canvas: Parent canvas to attach the buttons to.
-            items: List of ``(display_text, callback)`` pairs. Cost suffixes
-                (e.g. ``" [-30 min]"``) are stripped when building the dict key.
+            items: List of ``(display_text, callback)`` pairs. Distance suffixes
+                (e.g. ``" [+8 ft]"``) are stripped when building the dict key.
 
         Returns:
             Dict mapping base action name to :class:`tk.Button`.
