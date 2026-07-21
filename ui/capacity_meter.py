@@ -19,6 +19,27 @@ class CapacityMeter:
     canvas: tk.Canvas
     unit_size: int
     _units: list[int]
+    CATEGORY_COLORS = {
+        "medic": "#56E9F9",          # Cyan (Healthy Specialist)
+        "engineer": "#64EAF9",       # Cyan (Healthy Specialist)
+        "injured_medic": "#1E90FF",   # Deep Blue (Injured Specialist)
+        "injured_engineer": "#1E90FF",# Deep Blue (Injured Specialist)
+        "civilian": "#46DF46",       # Green (Healthy Civilian)
+        "injured": "#FFA500",        # Orange (Injured Civilian)
+        "zombie": "#D13C3C",         # Red (Threat)
+        "corpse": "#CB3D3D",         # Dark Red (Corpse)
+    }
+
+    CATEGORY_PRIORITY = {
+        "medic": 1,
+        "engineer": 2,
+        "injured_medic": 3,
+        "injured_engineer": 4,
+        "civilian": 5,
+        "injured": 6,
+        "zombie": 7,
+        "corpse": 8,
+    }
 
     def __init__(self, root: Any, w: int, h: int, max_cap: int) -> None:
         """Create the capacity meter canvas and render all unit squares.
@@ -67,24 +88,72 @@ class CapacityMeter:
                 x = 3
                 y += size * 3 // 2
 
-    def update_fill(self, index: int) -> None:
-        """Update the filled/empty state of the capacity squares.
-
-        Clears all squares first, then fills slots ``0`` through ``index - 1``
-        in the danger color. Pass ``index=0`` to show an empty ambulance.
-
-        Args:
-            index: Number of slots currently occupied.
-        """
+    def update_fill(self, saved_passengers: Any) -> None:
+        """Update the filled/empty state of the capacity squares."""
+        # 1. Reset all canvas squares to empty background
         for unit in self._units:
             self.canvas.itemconfig(unit, fill=UI_COLORS["panel"], outline="#555555")
-        for i in range(index):
+
+        # Handle integer inputs (e.g. update_fill(0))
+        if isinstance(saved_passengers, int):
+            for i in range(min(saved_passengers, len(self._units))):
+                self.canvas.itemconfig(
+                    self._units[i],
+                    fill=UI_COLORS["meter_filled"],
+                    outline=UI_COLORS["meter_filled"],
+                )
+            return
+
+        # If passed ScoreKeeper.ambulance dictionary, expand it into a list of strings
+        if isinstance(saved_passengers, dict):
+            expanded = []
+            for category, count in saved_passengers.items():
+                expanded.extend([category] * count)
+            saved_passengers = expanded
+
+        if not isinstance(saved_passengers, (list, tuple)):
+            return
+
+        # 2. Extract sorting/color key from Humanoid objects, strings, or dicts
+        def get_key(h):
+            if isinstance(h, str):
+                return h.lower()
+            if isinstance(h, dict):
+                state = h.get("state", "").lower()
+                role = h.get("role", "civilian").lower()
+            else:
+                state = getattr(h, "state", "").lower()
+                role = getattr(h, "role", "civilian").lower()
+
+            if state in ("zombie", "corpse"):
+                return state
+
+            if state == "injured":
+                if role in ("medic", "engineer"):
+                    return f"injured_{role}"
+                return "injured"
+
+            return role if role in ("medic", "engineer") else "civilian"
+
+        # 3. Sort passengers by CATEGORY_PRIORITY
+        sorted_passengers = sorted(
+            saved_passengers,
+            key=lambda h: self.CATEGORY_PRIORITY.get(get_key(h), 99)
+        )
+
+        # 4. Apply colors to grid slots
+        for i, humanoid in enumerate(sorted_passengers):
+            if i >= len(self._units):
+                break  # Prevent capacity overflow
+
+            key = get_key(humanoid)
+            color = self.CATEGORY_COLORS.get(key, UI_COLORS["meter_filled"])
+
             self.canvas.itemconfig(
                 self._units[i],
-                fill=UI_COLORS["meter_filled"],
-                outline=UI_COLORS["meter_filled"],
+                fill=color,
+                outline=color,
             )
-
     @staticmethod
     def create_unit(canvas: tk.Canvas, x: float, y: float, size: int) -> int:
         """Draw a single capacity square on the canvas and return its item ID.

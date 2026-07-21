@@ -83,6 +83,15 @@
             "cwd": "${workspaceFolder}"
         },
         {
+            "name": "train role cnn: RoleCNN training utility (10 ep)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": ["train", "--type", "cnn", "--model", "role"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
             "name": "pytest: run tests",
             "type": "debugpy",
             "request": "launch",

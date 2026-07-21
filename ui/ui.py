@@ -136,6 +136,7 @@ class UI:
     _game_label: tk.Label | None  # keeps game-logo PhotoImage alive
     _bwsi_label: tk.Label | None  # keeps BWSI-logo PhotoImage alive
 
+
     def __init__(
         self,
         data_parser: DataParser,
@@ -201,6 +202,7 @@ class UI:
         self.total_saved = 0
         self.total_killed = 0
         self.total_saved_value = 0.0
+        self.saved_passengers = []
         self.humanoid = data_parser.get_random()
         self.humanoids = [self.humanoid]
 
@@ -223,10 +225,12 @@ class UI:
                     **self._get_log_context(scorekeeper),
                 )
                 scorekeeper.skip(self.humanoid)
+
                 self.horde_meter.advance(
                     zombie_delta=HordeDistance.ZOMBIE.value,
                     ambulance_delta=HordeDistance.SKIP.value,
                 )
+
                 self.update_ui(scorekeeper)
                 self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -251,13 +255,28 @@ class UI:
                         )
                         scorekeeper.squish(selected_humanoid)
 
+
+                        for idx, h in enumerate(self.humanoids):
+                            if idx != chosen_index:
+                                self.humanoid = h
+                                scorekeeper.log_turn(
+                                    h,
+                                    "skip",
+                                    **self._get_log_context(scorekeeper),
+                                )
+                                scorekeeper.skip(h)
+
+
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
+                        self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
+
 
                         self.horde_meter.advance(
                             zombie_delta=HordeDistance.ZOMBIE.value,
                             ambulance_delta=HordeDistance.SQUISH.value,
                         )
+
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
                             self.button_menu.enable_all()
@@ -272,10 +291,12 @@ class UI:
                         **self._get_log_context(scorekeeper),
                     )
                     scorekeeper.squish(self.humanoid)
+
                     self.horde_meter.advance(
                         zombie_delta=HordeDistance.ZOMBIE.value,
                         ambulance_delta=HordeDistance.SQUISH.value,
                     )
+
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -300,13 +321,30 @@ class UI:
                         )
                         scorekeeper.save(selected_humanoid)
 
+                        self.saved_passengers.append(selected_humanoid)
+
+                        # 2. Log any unchosen image(s) as skipped
+                        for idx, h in enumerate(self.humanoids):
+                            if idx != chosen_index:
+                                self.humanoid = h
+                                scorekeeper.log_turn(
+                                    h,
+                                    "skip",
+                                    **self._get_log_context(scorekeeper),
+                                )
+                                scorekeeper.skip(h)
+
+
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
+                        self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
+
 
                         self.horde_meter.advance(
                         zombie_delta=HordeDistance.ZOMBIE.value,
                         ambulance_delta=HordeDistance.SAVE.value,
                     )
+
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
                             self.button_menu.enable_all()
@@ -321,10 +359,12 @@ class UI:
                         **self._get_log_context(scorekeeper),
                     )
                     scorekeeper.save(self.humanoid)
+
                     self.horde_meter.advance(
                         zombie_delta=HordeDistance.ZOMBIE.value,
                         ambulance_delta=HordeDistance.SAVE.value,
                     )
+
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -488,7 +528,7 @@ class UI:
     # UI update helpers
     # ------------------------------------------------------------------
 
-    def _get_log_context(self, scorekeeper: ScoreKeeper) -> dict:
+    def _get_log_context(self, scorekeeper: ScoreKeeper, target_humanoid: Humanoid | None = None) -> dict:
         """Return keyword args for ``scorekeeper.log_turn()`` with classifier context.
 
         Reads from ``self._last_probs`` (cached by ``_update_info_display``) to
@@ -502,12 +542,16 @@ class UI:
             Dict with ``predicted_class`` (``int | None``) and
             ``recommended_action`` (``str | None``).
         """
+        h = target_humanoid if target_humanoid is not None else self.humanoid
+
         predicted_class = None
         recommended_action = None
         confidence = None
-        probs = self._last_probs  # use cached output from _update_info_display
+
+        probs = None # use cached output from _update_info_display
         if probs is None and self.classifier is not None:
-            probs = self.classifier.classify(self.humanoid)
+            probs = self.classifier.classify(h)
+
         if probs is not None:
             predicted_class = int(np.argmax(probs))
             max_prob = float(np.max(probs))
@@ -519,12 +563,10 @@ class UI:
         if self.recommender is not None and probs is not None:
             # Use cached action from _update_info_display — avoids a second recommend()
             # call that could return a different result for stochastic recommenders.
-            if self._last_recommended_action is not None:
-                recommended_action = self._last_recommended_action
-            else:
-                recommended_action = self.recommender.recommend(
-                    self.humanoid, probs, scorekeeper
-                ).value
+            recommended_action = self.recommender.recommend(
+                h, probs, scorekeeper
+            ).value
+
         return {
             "predicted_class": predicted_class,
             "recommended_action": recommended_action,
@@ -540,7 +582,8 @@ class UI:
         """
         hour, minute = self._time_to_clock_hands(scorekeeper.remaining_time)
         self.clock.update_time(hour, minute)
-        self.capacity_meter.update_fill(max(0, scorekeeper.get_current_capacity()))
+
+        self.capacity_meter.update_fill(self.saved_passengers)
 
     def _update_info_display(self, scorekeeper: ScoreKeeper) -> None:
         """Refresh the classifier/recommender output label for the current humanoid.
@@ -555,18 +598,24 @@ class UI:
         if self._info_label is None:
             return
         lines = []
-        probs = None
-        if self.classifier is not None:
-            probs = self.classifier.classify(self.humanoid)
-            self._last_probs = probs  # cache for _get_log_context — single forward pass
-            if self._show_classifier_label:
-                label, confidence = probs_to_class(probs)
-                lines.append(f"Classified as: {label.value} ({confidence:.0%})")
-        if self.recommender is not None and probs is not None:
-            action = self.recommender.recommend(self.humanoid, probs, scorekeeper)
-            self._last_recommended_action = action.value  # cache for _get_log_context
-            lines.append(f"Suggested: {action.value}")
-        self._info_label.config(text="\n".join(lines))
+        self._last_probs = []
+        for idx, h in enumerate(self.humanoids):
+            prefix = f"Img {idx + 1}: " if len(self.humanoids) > 1 else ""
+            probs = None
+
+            if self.classifier is not None:
+                probs = self.classifier.classify(h)
+                self._last_probs.append(probs)  # cache for _get_log_context — single forward pass
+                
+                if self._show_classifier_label:
+                    label, confidence = probs_to_class(probs)
+                    lines.append(f"{prefix} Classified as: {label.value} ({confidence:.0%})")
+            
+            if self.recommender is not None and probs is not None:
+                action = self.recommender.recommend(h, probs, scorekeeper)
+                self._last_recommended_action = action.value  # cache for _get_log_context
+                lines.append(f"Suggested: {action.value}")
+        self._info_label.config(text="\n\n".join(lines))
 
     def get_next(
         self,
@@ -589,9 +638,11 @@ class UI:
             score = (
                 scorekeeper.get_score()
             )  # scrams remaining passengers; ambulance now empty
-            self.total_saved += score["saved"]
-            self.total_killed += score["killed"]
-            self.total_saved_value += score["saved_value"]
+            self.total_saved = getattr(self, "total_saved", 0) + score["saved"]
+            self.total_killed = getattr(self, "total_killed", 0) + score["killed"]
+            self.total_saved_value = getattr(self, "total_saved_value", 0.0) + score.get(
+                "saved_value", 0.0
+            )
             self.capacity_meter.update_fill(max(0, scorekeeper.get_current_capacity()))
             # Disable buttons before reset() — reset() restores remaining_time to the
             # full shift length, which would fool disable_buttons() into re-enabling them.
@@ -606,7 +657,7 @@ class UI:
             self.game_viewer.display_score(
                 score,
                 end_reason=end_reason,
-                round_num=self.round_num,
+                round_num=getattr(self, "round_num", 1),
                 totals={
                     "saved": self.total_saved,
                     "killed": self.total_killed,
@@ -659,6 +710,7 @@ class UI:
             scorekeeper: ScoreKeeper to reset for the new round.
         """
         self.round_num += 1
+        self.saved_passengers.clear()
         scorekeeper.reset()
         data_parser.reset()
         self.game_viewer.clear_score_display()
