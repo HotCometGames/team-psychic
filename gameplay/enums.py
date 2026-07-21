@@ -50,3 +50,19 @@ class ActionCost(Enum):
     SQUISH = 5
     SKIP = 15
     SCRAM = 120
+
+
+class HordeDistance(Enum):
+    """Feet moved per turn on the horde meter (distance-based game state).
+
+    Design intent: the horde never stops — it advances ZOMBIE ft every
+    single turn, no matter which action the player takes. The ambulance's
+    own distance depends on the action taken: SQUISH clears the most
+    ground (fast, aggressive); SKIP makes modest progress; SAVE trades all
+    ground for saving a life — the ambulance doesn't move at all.
+    """
+
+    ZOMBIE = 10
+    SAVE = 0
+    SQUISH = 15
+    SKIP = 10
