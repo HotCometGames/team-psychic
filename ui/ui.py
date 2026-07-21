@@ -359,7 +359,7 @@ class UI:
                         **self._get_log_context(scorekeeper),
                     )
                     scorekeeper.save(self.humanoid)
-
+                    self.saved_passengers.append(self.humanoid)
                     self.horde_meter.advance(
                         zombie_delta=HordeDistance.ZOMBIE.value,
                         ambulance_delta=HordeDistance.SAVE.value,
