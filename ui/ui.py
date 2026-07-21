@@ -57,7 +57,7 @@ from gameplay.constants import (
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
 )
-from gameplay.enums import ActionCost
+from gameplay.enums import ActionCost, HordeDistance
 from gameplay.humanoid import Humanoid
 from gameplay.scorekeeper import ScoreKeeper
 from models.ActionRecommender import ActionRecommender
@@ -225,7 +225,12 @@ class UI:
                     **self._get_log_context(scorekeeper),
                 )
                 scorekeeper.skip(self.humanoid)
-                self.horde_meter.advance(zombie_delta=10, ambulance_delta=10)
+
+                self.horde_meter.advance(
+                    zombie_delta=HordeDistance.ZOMBIE.value,
+                    ambulance_delta=HordeDistance.SKIP.value,
+                )
+
                 self.update_ui(scorekeeper)
                 self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -250,6 +255,7 @@ class UI:
                         )
                         scorekeeper.squish(selected_humanoid)
 
+
                         for idx, h in enumerate(self.humanoids):
                             if idx != chosen_index:
                                 self.humanoid = h
@@ -260,18 +266,22 @@ class UI:
                                 )
                                 scorekeeper.skip(h)
 
+
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
                         self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
 
-                        self.horde_meter.advance(zombie_delta=10, ambulance_delta=15)
+
+                        self.horde_meter.advance(
+                            zombie_delta=HordeDistance.ZOMBIE.value,
+                            ambulance_delta=HordeDistance.SQUISH.value,
+                        )
+
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
                             self.button_menu.enable_all()
                         self.get_next(data_fp, data_parser, scorekeeper)
-                        
 
-                   
                     # Inject our selection handler closure into the game viewer
                     self.game_viewer.on_image_selected = handle_choice
                 else:
@@ -281,7 +291,12 @@ class UI:
                         **self._get_log_context(scorekeeper),
                     )
                     scorekeeper.squish(self.humanoid)
-                    self.horde_meter.advance(zombie_delta=10, ambulance_delta=15)
+
+                    self.horde_meter.advance(
+                        zombie_delta=HordeDistance.ZOMBIE.value,
+                        ambulance_delta=HordeDistance.SQUISH.value,
+                    )
+
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -305,6 +320,7 @@ class UI:
                             **self._get_log_context(scorekeeper),
                         )
                         scorekeeper.save(selected_humanoid)
+
                         self.saved_passengers.append(selected_humanoid)
 
                         # 2. Log any unchosen image(s) as skipped
@@ -318,11 +334,17 @@ class UI:
                                 )
                                 scorekeeper.skip(h)
 
+
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
                         self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
 
-                        self.horde_meter.advance(zombie_delta=10, ambulance_delta=0)
+
+                        self.horde_meter.advance(
+                        zombie_delta=HordeDistance.ZOMBIE.value,
+                        ambulance_delta=HordeDistance.SAVE.value,
+                    )
+
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
                             self.button_menu.enable_all()
@@ -337,8 +359,12 @@ class UI:
                         **self._get_log_context(scorekeeper),
                     )
                     scorekeeper.save(self.humanoid)
-                    self.saved_passengers.append(self.humanoid)
-                    self.horde_meter.advance(zombie_delta=10, ambulance_delta=0)
+
+                    self.horde_meter.advance(
+                        zombie_delta=HordeDistance.ZOMBIE.value,
+                        ambulance_delta=HordeDistance.SAVE.value,
+                    )
+
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -354,9 +380,9 @@ class UI:
                 self.get_next(data_fp, data_parser, scorekeeper)
 
             user_buttons = [
-                (f"Skip [-{ActionCost.SKIP.value} min]", _on_skip),
-                (f"Squish [-{ActionCost.SQUISH.value} min]", _on_squish),
-                (f"Save [-{ActionCost.SAVE.value} min]", _on_save),
+                (f"Skip [+{HordeDistance.SKIP.value} ft]", _on_skip),
+                (f"Squish [+{HordeDistance.SQUISH.value} ft]", _on_squish),
+                (f"Save [+{HordeDistance.SAVE.value} ft]", _on_save),
             ]
             self.button_menu = ButtonMenu(self.root, user_buttons)
 
