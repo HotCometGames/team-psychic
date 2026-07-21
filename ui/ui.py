@@ -432,17 +432,17 @@ class UI:
             self._info_label = tk.Label(
                 self.root,
                 text="",
-                font=("Arial", 16),
+                font=("Arial", 14),
                 justify=tk.LEFT,
                 anchor="w",
                 bg=UI_COLORS["bg"],
                 fg=UI_COLORS["fg"],
             )
             self._info_label.place(
-                x=math.floor(0.72 * w),
-                y=math.floor(0.72 * h),
-                width=math.floor(0.26 * w),
-                height=math.floor(0.12 * h),
+                x=math.floor(0.75 * w),
+                y=math.floor(0.1 * h),
+                width=math.floor(0.5 * w),
+                height=math.floor(0.125 * h),
             )
             # Show initial classification/recommendation for the first humanoid
             self._update_info_display(scorekeeper)
@@ -610,12 +610,21 @@ class UI:
                 if self._show_classifier_label:
                     label, confidence = probs_to_class(probs)
                     lines.append(f"{prefix} Classified as: {label.value} ({confidence:.0%})")
+                    if label.value == "healthy" and hasattr(self.classifier, "classify_role"):
+                        role_probs = self.classifier.classify_role(h, state_probs=probs)
+                        if role_probs is not None:
+                            role_names = ("civilian", "medic", "engineer")
+                            role_idx = int(np.argmax(role_probs))
+                            lines.append(
+                                f"{prefix} Role: {role_names[role_idx]} "
+                                f"({float(role_probs[role_idx]):.0%})"
+                            )
             
             if self.recommender is not None and probs is not None:
                 action = self.recommender.recommend(h, probs, scorekeeper)
                 self._last_recommended_action = action.value  # cache for _get_log_context
                 lines.append(f"Suggested: {action.value}")
-        self._info_label.config(text="\n\n".join(lines))
+        self._info_label.config(text="\n".join(lines))
 
     def get_next(
         self,

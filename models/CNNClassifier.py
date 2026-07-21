@@ -7,10 +7,11 @@ import torch
 from PIL import Image
 from torchvision import transforms
 
-from gameplay.constants import CLASSIFIER_MODEL_PATH
+from gameplay.constants import CLASSIFIER_MODEL_PATH, ROLE_CLASSIFIER_MODEL_PATH
 from gameplay.humanoid import Humanoid
 from models.DefaultCNN import DefaultCNN
 from models.HumanoidClassifier import HumanoidClassifier
+from models.RoleCNN import RoleCNN
 
 
 class CNNClassifier(HumanoidClassifier):
@@ -31,6 +32,7 @@ class CNNClassifier(HumanoidClassifier):
 
     num_classes: int
     net: DefaultCNN
+    role_net: RoleCNN
     device: torch.device
     image_transforms: transforms.Compose
     img_data_root: str
@@ -39,6 +41,7 @@ class CNNClassifier(HumanoidClassifier):
         self,
         num_classes: int = 4,
         model_file: str = CLASSIFIER_MODEL_PATH,
+        role_model_file: str = ROLE_CLASSIFIER_MODEL_PATH,
         img_data_root: str = "data",
     ) -> None:
         """Load CNN weights and set up the inference pipeline.
@@ -46,17 +49,24 @@ class CNNClassifier(HumanoidClassifier):
         Args:
             num_classes: Number of output classes.
             model_file: Path to the ``.pth`` weights file.
+            role_model_file: Path to the RoleCNN ``.pth`` weights file.
             img_data_root: Root directory that image ``.fp`` paths are
                 relative to.
 
         Raises:
-            FileNotFoundError: If ``model_file`` does not exist.
+            FileNotFoundError: If either model weights file does not exist.
         """
         if not os.path.exists(model_file):
             raise FileNotFoundError(
                 f"CNN weights not found at '{model_file}'. "
                 "Train the model first ('python main.py train --type cnn') or update "
                 "CLASSIFIER_MODEL_PATH in gameplay/constants.py."
+            )
+        if not os.path.exists(role_model_file):
+            raise FileNotFoundError(
+                f"RoleCNN weights not found at '{role_model_file}'. "
+                "Train the role model first ('python main.py train --type cnn --model role') "
+                "or update ROLE_CLASSIFIER_MODEL_PATH in gameplay/constants.py."
             )
         self.num_classes = num_classes
         self.device = (
@@ -80,6 +90,7 @@ class CNNClassifier(HumanoidClassifier):
         )
         self.img_data_root = img_data_root
         self._load_model(model_file)
+        self._load_role_model(role_model_file)
 
     def _load_model(self, weights_path: str) -> None:
         """Load DefaultCNN weights from disk.
@@ -98,6 +109,29 @@ class CNNClassifier(HumanoidClassifier):
         self.net.to(self.device)
         self.net.eval()  # disable Dropout2d during inference — must be called after load
 
+    def _load_role_model(self, weights_path: str) -> None:
+        """Load the three-class RoleCNN weights used for healthy humanoids."""
+        self.role_net = RoleCNN(num_roles_=3)
+        load_kwargs: dict = {"map_location": self.device}
+        if tuple(int(x) for x in torch.__version__.split("+")[0].split(".")[:2]) >= (
+            2,
+            0,
+        ):
+            load_kwargs["weights_only"] = True
+        self.role_net.load_state_dict(torch.load(weights_path, **load_kwargs))  # nosec B614
+        self.role_net.to(self.device)
+        self.role_net.eval()
+
+    def _image_tensor(self, humanoid: Humanoid) -> torch.Tensor:
+        """Load and preprocess one humanoid image for either CNN."""
+        with Image.open(os.path.join(self.img_data_root, humanoid.fp)) as image_:
+            return (
+                self.image_transforms(image_.convert("RGB"))
+                .float()
+                .unsqueeze(0)
+                .to(self.device)
+            )
+
     def classify(self, humanoid: Humanoid) -> np.ndarray:
         """Return CNN probability distribution over humanoid classes.
 
@@ -114,13 +148,25 @@ class CNNClassifier(HumanoidClassifier):
             Float32 array of shape ``(4,)`` with softmax probabilities in
             class order: ``[zombie, healthy, injured, corpse]``.
         """
-        with Image.open(os.path.join(self.img_data_root, humanoid.fp)) as image_:
-            tensor = (
-                self.image_transforms(image_.convert("RGB"))
-                .float()
-                .unsqueeze(0)
-                .to(self.device)
-            )
+        tensor = self._image_tensor(humanoid)
         with torch.no_grad():
             outputs = self.net(tensor)
+            return torch.nn.functional.softmax(outputs, 1)[0].cpu().numpy()
+
+    def classify_role(
+        self, humanoid: Humanoid, state_probs: np.ndarray | None = None
+    ) -> np.ndarray | None:
+        """Classify a healthy humanoid as civilian, medic, or engineer.
+
+        Returns ``None`` when the DefaultCNN does not predict ``healthy``.
+        RoleCNN output order follows its training dataset: civilian, medic,
+        engineer.
+        """
+        if state_probs is None:
+            state_probs = self.classify(humanoid)
+        if int(np.argmax(state_probs)) != 1:
+            return None
+        tensor = self._image_tensor(humanoid)
+        with torch.no_grad():
+            outputs = self.role_net(tensor)
             return torch.nn.functional.softmax(outputs, 1)[0].cpu().numpy()

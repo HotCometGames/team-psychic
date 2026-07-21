@@ -25,7 +25,7 @@ class Humanoid:
     role: str
     value: float
 
-    def __init__(self, fp: str, state: str, role: str, value: float = 0.0) -> None:
+    def __init__(self, fp: str, state: str, role: str = "civilian", value: float = 0.0) -> None:
         """Initialize a Humanoid.
 
         Args:
