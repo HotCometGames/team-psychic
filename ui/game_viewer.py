@@ -3,9 +3,9 @@ import tkinter as tk
 from collections.abc import Callable
 from os.path import join
 from typing import Any
-from PIL import ImageTk, Image
+from PIL import ImageTk, Image, ImageFilter
 
-from gameplay.constants import UI_COLORS
+from gameplay.constants import IMAGE_BLUR_RADIUS, UI_COLORS
 
 # Emoji glyphs used as lightweight icons on the camp screen — no image assets
 # to manage, and Tk resolves them via the system emoji font automatically.
@@ -16,7 +16,11 @@ _ICON_VALUE = "⭐"  # star
 _ICON_CURED = "\U0001FA79"  # bandage — injured survivors healed by a doctor
 _ICON_CONTINUE = "➡"  # arrow
 _ICON_RULES = "\U0001F4CB"  # clipboard — game-rules screen shown once at start
+
 _ICON_FOG = "\U0001F32B"  # fog — round-2 briefing screen (blur mechanic)
+
+_ICON_RESTART = "↺"  # restart arrow
+
 
 
 class GameViewer:
@@ -84,11 +88,18 @@ class GameViewer:
         self.canvas.delete("photo")
         self.photos = []
 
-    def create_photos(self, file_paths: list[str]) -> None:
+    def create_photos(self, file_paths: list[str], blur: bool = False) -> None:
         """Load a list of images from disk and display them side-by-side.
 
         Replaces any existing photos. Automatically divides the canvas width
         equally among all images provided.
+
+        Args:
+            file_paths: Image file paths to display, one per canvas slice.
+            blur: If True, apply a Gaussian blur to every image — used from
+                round ``IMAGE_BLUR_START_ROUND`` onward to push the player
+                toward the classifier/recommender's suggestion instead of
+                the raw image.
         """
         self.canvas.delete("photo")
         self.canvas.delete("indicator")
@@ -111,12 +122,13 @@ class GameViewer:
 
         target_w = math.floor(canvas_w / num_images)
 
+        blur_radius = IMAGE_BLUR_RADIUS if blur else 0.0
         for i, fp in enumerate(file_paths):
             # Calculate the horizontal offset for each image
             x_offset = i * target_w
 
             # Load and resize image to fit its fractional slice
-            photo = self._get_photo(fp, target_w, canvas_h)
+            photo = self._get_photo(fp, target_w, canvas_h, blur_radius=blur_radius)
             self.photos.append(photo)
 
             img_h = photo.height()
@@ -130,7 +142,7 @@ class GameViewer:
                 tags=("photo", f"idx_{i}")
             )
 
-    def create_photo(self, fp: str) -> None:
+    def create_photo(self, fp: str, blur: bool = False) -> None:
         """Load an image from disk and display it on the canvas.
 
         Replaces any existing photo. Holds a reference in ``self.photo``
@@ -138,8 +150,9 @@ class GameViewer:
 
         Args:
             fp: Path to the image file.
+            blur: If True, apply a Gaussian blur (see ``create_photos``).
         """
-        self.create_photos([fp])
+        self.create_photos([fp], blur=blur)
 
     def _on_canvas_click(self, event: Any) -> None:
             """Determines which image slice was clicked and fires the selection callback."""
@@ -214,6 +227,7 @@ class GameViewer:
         totals: "dict[str, int | float] | None" = None,
         on_continue: "Callable[[], None] | None" = None,
         round1_score: "dict[str, int | float] | None" = None,
+        on_restart: "Callable[[], None] | None" = None,
     ) -> None:
         """Render the camp screen — round results — over the canvas.
 
@@ -231,13 +245,16 @@ class GameViewer:
                 across every round played so far. Omit to hide the career-totals
                 section (e.g. before round 1 has any history to show).
             on_continue: Optional callback fired by a "Continue to Next Round"
-                button. Omit to render the score with no continue button (e.g.
-                a true game-over screen).
+                button. Omit (with ``on_restart`` set instead) to render the
+                run-complete screen instead — no more rounds left.
             round1_score: Optional dict with the same shape as ``score``,
                 holding round 1's own numbers. Only pass this once round 1 is
                 complete and a later round is what's currently being shown —
                 renders a third "ROUND 1" card alongside this round's and the
                 career totals.
+            on_restart: Optional callback fired by a "Restart Game" button,
+                shown only when ``on_continue`` is omitted (i.e. the run just
+                ended). Resets the whole run back to round 1.
         """
         self.clear_score_display()  # guard against stacking widgets on a stale screen
 
@@ -319,7 +336,8 @@ class GameViewer:
             ).pack(anchor=tk.W, pady=(24, 0))
         else:
             # No on_continue means no rounds remain (MAX_ROUNDS reached) —
-            # say so explicitly rather than leaving the screen looking stuck.
+            # say so explicitly rather than leaving the screen looking stuck,
+            # and offer a way to play the whole thing again.
             tk.Label(
                 outer,
                 text="RUN COMPLETE — thanks for playing!",
@@ -327,6 +345,21 @@ class GameViewer:
                 bg=UI_COLORS["panel"],
                 fg=UI_COLORS["accent"],
             ).pack(anchor=tk.W, pady=(24, 0))
+            if on_restart is not None:
+                tk.Button(
+                    outer,
+                    text=f"Restart Game  {_ICON_RESTART}",
+                    font=("Arial", 15, "bold"),
+                    bg=UI_COLORS["btn_save"],
+                    fg="black",
+                    activebackground="black",
+                    activeforeground=UI_COLORS["fg"],
+                    relief=tk.FLAT,
+                    bd=0,
+                    padx=18,
+                    pady=10,
+                    command=on_restart,
+                ).pack(anchor=tk.W, pady=(10, 0))
 
     def display_rules(self, on_start: "Callable[[], None]") -> None:
         """Render the one-time rules screen shown when the game first launches.
@@ -601,13 +634,19 @@ class GameViewer:
             ).pack(anchor=tk.W, pady=2)
 
     @staticmethod
-    def _get_photo(img_path: str, max_w: int, max_h: int) -> Any:
+    def _get_photo(
+        img_path: str, max_w: int, max_h: int, blur_radius: float = 0.0
+    ) -> Any:
         """Load, resize, and return a Tkinter-compatible photo image.
 
         Args:
             img_path: Path to the image file.
             w: Target width in pixels.
             h: Target height in pixels.
+            blur_radius: Gaussian blur radius in pixels. ``0`` (default) skips
+                blurring entirely. Applied after resizing so the radius is
+                consistent with what's actually displayed, regardless of the
+                source image's native resolution.
 
         Returns:
             An :class:`~PIL.ImageTk.PhotoImage` resized to ``(w, h)``.
@@ -625,5 +664,8 @@ class GameViewer:
             new_w = int(orig_w * scale)
             new_h = int(orig_h * scale)
 
-            tk_img = ImageTk.PhotoImage(img.resize((new_w, new_h), Image.LANCZOS))
+            resized = img.resize((new_w, new_h), Image.LANCZOS)
+            if blur_radius > 0:
+                resized = resized.filter(ImageFilter.GaussianBlur(blur_radius))
+            tk_img = ImageTk.PhotoImage(resized)
         return tk_img
