@@ -54,6 +54,7 @@ from gameplay.constants import (
     ENGINEER_SPEED_BONUS,
     HORDE_INITIAL_DISTANCE,
     HORDE_MAX_DISTANCE,
+    IMAGE_BLUR_START_ROUND,
     MAX_ROUNDS,
     UI_COLORS,
     WINDOW_HEIGHT,
@@ -555,14 +556,12 @@ class UI:
             self.engineer_bonus_ft += ENGINEER_SPEED_BONUS
 
     def _should_blur_images(self) -> bool:
-        """Return True if humanoid images should be blurred for the current round.
+        """Return True when humanoid images should be blurred for the current round.
 
-        Tied to the same ``ai_starts_round`` gate as the classifier/recommender
-        display — blur and AI assistance always turn on together. Demo modes
-        that pass ``ai_starts_round=None`` (human_cnn/human_rl/human_cnn_rl)
-        never blur, since their whole purpose is showing AI output from round 1.
+        Blur now starts in round 2 for every mode, regardless of whether the
+        AI assistance display is active yet.
         """
-        return self._ai_starts_round is not None and self.round_num >= self._ai_starts_round
+        return self.round_num >= IMAGE_BLUR_START_ROUND
 
     def _ai_display_active(self) -> bool:
         """Return True if classifier/recommender output should be shown right now.
