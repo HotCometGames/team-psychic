@@ -399,8 +399,6 @@ class UI:
             self.root, w, h,
             max_distance=HORDE_MAX_DISTANCE,
             initial_distance=HORDE_INITIAL_DISTANCE,
-            zombie_img_path=join(dirname(abspath(__file__)), "graphics", "zombie.png"),
-            ambulance_img_path=join(dirname(abspath(__file__)), "graphics", "ambulance.png"),
         )
 
         # --- Value display ---
@@ -448,6 +446,11 @@ class UI:
             self.root.destroy()
 
         self.root.protocol("WM_DELETE_WINDOW", _on_close)
+
+        # Rules screen — shown once, on top of everything else, before the
+        # player can interact with the game underneath.
+        self.game_viewer.display_rules(on_start=lambda: None)
+
         self.root.mainloop()
 
     # ------------------------------------------------------------------

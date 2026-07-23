@@ -66,7 +66,7 @@ CNN_CONFIDENCE_HIGH: float = 0.75  # above this → high confidence (bin 2)
 # costs (ActionCost) are unchanged — they still deduct remaining_time for
 # logging/RL purposes, they just no longer end the round.
 # Per-action feet moved each turn live in gameplay/enums.py — HordeDistance.
-HORDE_MAX_DISTANCE: float = 200.0  # ft from horde start (0) to camp
+HORDE_MAX_DISTANCE: float = 300.0  # ft from horde start (0) to camp
 HORDE_INITIAL_DISTANCE: float = 20.0  # ambulance's starting lead over the horde
 
 # UI color palette — adjust these to restyle the interface.
