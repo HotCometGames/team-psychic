@@ -211,6 +211,7 @@ class GameViewer:
         round_num: int | None = None,
         totals: "dict[str, int | float] | None" = None,
         on_continue: "Callable[[], None] | None" = None,
+        round1_score: "dict[str, int | float] | None" = None,
     ) -> None:
         """Render the camp screen — round results — over the canvas.
 
@@ -230,6 +231,11 @@ class GameViewer:
             on_continue: Optional callback fired by a "Continue to Next Round"
                 button. Omit to render the score with no continue button (e.g.
                 a true game-over screen).
+            round1_score: Optional dict with the same shape as ``score``,
+                holding round 1's own numbers. Only pass this once round 1 is
+                complete and a later round is what's currently being shown —
+                renders a third "ROUND 1" card alongside this round's and the
+                career totals.
         """
         self.clear_score_display()  # guard against stacking widgets on a stale screen
 
@@ -281,7 +287,16 @@ class GameViewer:
         cards_row = tk.Frame(outer, bg=UI_COLORS["panel"])
         cards_row.pack(anchor=tk.W, fill=tk.X)
 
-        self._build_stat_card(cards_row, "THIS ROUND", score)
+        if round1_score is not None:
+            self._build_stat_card(cards_row, "ROUND 1", round1_score)
+            self._build_stat_card(
+                cards_row,
+                f"ROUND {round_num}" if round_num is not None else "THIS ROUND",
+                score,
+                padx=(20, 0),
+            )
+        else:
+            self._build_stat_card(cards_row, "THIS ROUND", score)
         if totals is not None:
             self._build_stat_card(cards_row, "CAREER TOTALS", totals, padx=(20, 0))
 

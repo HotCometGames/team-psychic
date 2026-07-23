@@ -201,6 +201,7 @@ class UI:
         self.total_killed = 0
         self.total_saved_value = 0.0
         self.total_cured = 0
+        self.round_scores = []  # per-round score dicts, appended at each round-end
         self.saved_passengers = []
         self.humanoid = data_parser.get_random()
         self.humanoids = [self.humanoid]
@@ -647,6 +648,7 @@ class UI:
             )  # scrams remaining passengers; ambulance now empty
             # Doctors cure at camp, before reset() clears medics_saved for the next round.
             scorekeeper.cure_injured()
+            self.round_scores.append(score)  # keep this round's own numbers for later display
             self.total_saved += score["saved"]
             self.total_killed += score["killed"]
             self.total_saved_value += score["saved_value"]
@@ -681,6 +683,9 @@ class UI:
                     "cured": self.total_cured,
                 },
                 on_continue=on_continue,
+                # Once round 1 is in the books, show its own numbers alongside
+                # this round's and the running totals (3 boards on the final screen).
+                round1_score=self.round_scores[0] if len(self.round_scores) >= 2 else None,
             )
         else:
             show_two = random() < 0.20
