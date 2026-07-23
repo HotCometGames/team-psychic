@@ -412,14 +412,14 @@ class GameViewer:
             tk.Label(
                 body,
                 text=header,
-                font=("Arial", 13, "bold"),
+                font=("Arial", 16, "bold"),
                 bg=UI_COLORS["panel"],
                 fg=UI_COLORS["accent"],
             ).pack(anchor=tk.W, pady=(10, 2))
             tk.Label(
                 body,
                 text=text,
-                font=("Arial", 11),
+                font=("Arial", 14),
                 bg=UI_COLORS["panel"],
                 fg=UI_COLORS["fg"],
                 justify=tk.LEFT,
@@ -434,7 +434,7 @@ class GameViewer:
         tk.Button(
             outer,
             text=f"Start Game  {_ICON_CONTINUE}",
-            font=("Arial", 15, "bold"),
+            font=("Arial", 16, "bold"),
             bg=UI_COLORS["btn_save"],
             fg="black",
             activebackground="black",
