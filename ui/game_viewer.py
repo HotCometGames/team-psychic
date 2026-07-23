@@ -15,6 +15,7 @@ _ICON_SAVED = "❤"  # heart
 _ICON_VALUE = "⭐"  # star
 _ICON_CURED = "\U0001FA79"  # bandage — injured survivors healed by a doctor
 _ICON_CONTINUE = "➡"  # arrow
+_ICON_RULES = "\U0001F4CB"  # clipboard — game-rules screen shown once at start
 
 
 class GameViewer:
@@ -325,6 +326,125 @@ class GameViewer:
                 bg=UI_COLORS["panel"],
                 fg=UI_COLORS["accent"],
             ).pack(anchor=tk.W, pady=(24, 0))
+
+    def display_rules(self, on_start: "Callable[[], None]") -> None:
+        """Render the one-time rules screen shown when the game first launches.
+
+        Follows the same full-window overlay treatment as display_score(),
+        but isn't tracked in _score_widgets since it's dismissed by its own
+        button rather than by clear_score_display().
+
+        Args:
+            on_start: Callback fired by the "Start Game" button, right after
+                this screen destroys itself.
+        """
+        margin = 20
+        outer = tk.Frame(
+            self._root,
+            bg=UI_COLORS["panel"],
+            highlightbackground=UI_COLORS["card_border"],
+            highlightthickness=1,
+        )
+        outer.place(
+            x=margin,
+            y=margin,
+            width=self._w - 2 * margin,
+            height=self._h - 2 * margin,
+        )
+        outer.lift()
+
+        tk.Label(
+            outer,
+            text=f"{_ICON_RULES}  GAME RULES",
+            font=("Arial", 28, "bold"),
+            bg=UI_COLORS["panel"],
+            fg=UI_COLORS["fg"],
+        ).pack(anchor=tk.W, padx=28, pady=(24, 16))
+
+        sections = [
+            (
+                "THE MISSION",
+                "Get your ambulance from the outbreak zone to Camp — 300 ft "
+                "away — before the zombie horde catches up.",
+            ),
+            (
+                "EACH TURN",
+                "A person appears in your path (sometimes two — click one "
+                "to choose). Decide their fate:\n"
+                "•  Skip — leave them behind. Ambulance advances 10 ft.\n"
+                "•  Squish — destroy them where they stand. Ambulance "
+                "advances 15 ft, your fastest option — but squishing a "
+                "healthy or injured human counts as a kill against you. "
+                "Zombies and corpses are always safe to squish.\n"
+                "•  Save — load them aboard. The ambulance doesn't move at "
+                "all — you're trading distance for a life.\n"
+                "No matter what you choose, the horde always advances 10 ft.",
+            ),
+            (
+                "WIN / LOSE",
+                "The horde catches you → round over, you died.\n"
+                "You reach Camp first → round over, you lived.",
+            ),
+            (
+                "AMBULANCE CAPACITY",
+                "15 seats. Once full, you can't Save anyone else until you "
+                "reach Camp.",
+            ),
+            (
+                "SPECIAL ROLES",
+                "•  Engineers — stack a +2 ft bonus onto every Skip/Squish "
+                "for as long as they're aboard.\n"
+                "•  Medics — every medic delivered to Camp can cure 2 "
+                "injured survivors.",
+            ),
+            (
+                "THE RUN",
+                "You'll play 2 rounds. Your stats carry over — the final "
+                "screen shows Round 1, Round 2, and your combined career "
+                "totals.",
+            ),
+        ]
+
+        body = tk.Frame(outer, bg=UI_COLORS["panel"])
+        body.pack(anchor=tk.W, fill=tk.BOTH, expand=True, padx=28)
+
+        for header, text in sections:
+            tk.Label(
+                body,
+                text=header,
+                font=("Arial", 13, "bold"),
+                bg=UI_COLORS["panel"],
+                fg=UI_COLORS["accent"],
+            ).pack(anchor=tk.W, pady=(10, 2))
+            tk.Label(
+                body,
+                text=text,
+                font=("Arial", 11),
+                bg=UI_COLORS["panel"],
+                fg=UI_COLORS["fg"],
+                justify=tk.LEFT,
+                anchor="w",
+                wraplength=self._w - 2 * margin - 56,
+            ).pack(anchor=tk.W)
+
+        def _dismiss() -> None:
+            outer.destroy()
+            on_start()
+
+        tk.Button(
+            outer,
+            text=f"Start Game  {_ICON_CONTINUE}",
+            font=("Arial", 15, "bold"),
+            bg=UI_COLORS["btn_save"],
+            fg="black",
+            activebackground="black",
+            activeforeground=UI_COLORS["fg"],
+            relief=tk.FLAT,
+            bd=0,
+            padx=18,
+            pady=10,
+            command=_dismiss,
+        ).pack(anchor=tk.W, padx=28, pady=(16, 20))
 
     @staticmethod
     def _build_stat_card(
