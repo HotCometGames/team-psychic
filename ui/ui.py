@@ -375,22 +375,6 @@ class UI:
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
 
-            def _on_scram() -> None:
-                self.button_menu.disable_all()
-                scorekeeper.log_turn(
-                    self.humanoid,
-                    "scram",
-                    **self._get_log_context(scorekeeper),
-                )
-                scorekeeper.scram(self.humanoid)
-                # No HordeDistance member for scram yet (not currently a button) —
-                # a big ambulance jump matches what scram represents (driving away).
-                self.horde_meter.advance(
-                    zombie_delta=HordeDistance.ZOMBIE.value,
-                    ambulance_delta=40 + self.engineer_bonus_ft,
-                )
-                self.update_ui(scorekeeper)
-                self.get_next(data_fp, data_parser, scorekeeper)
 
             user_buttons = [
                 (f"Skip [+{HordeDistance.SKIP.value} ft]", _on_skip),
