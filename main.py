@@ -2,13 +2,21 @@
 
 Five game modes (GUI)
 ---------------------
-  human        Pure human play — no machine assistance
+  human        The default game. Round 1 is pure human play — no AI, no
+               blur. From round IMAGE_BLUR_START_ROUND onward, the CNN
+               classification + RL recommendation appear and humanoid
+               images blur, pushing you to lean on the AI's read instead
+               of eyeballing the raw image yourself.
   machine      Step-by-step machine play; press "Advance turn" to let the RL
                agent classify and act. Human watches.
-  human_cnn    CNN identifies each humanoid; human decides the action
-  human_rl     RL recommends an action; human decides (CNN runs internally
-               to build the obs vector, but classification label is hidden)
-  human_cnn_rl CNN identifies AND RL recommends; human decides the action
+  human_cnn    CNN identifies each humanoid from round 1; human decides the
+               action. A fixed-assist demo mode — unlike 'human', assistance
+               is visible immediately and never blurs.
+  human_rl     RL recommends an action from round 1; human decides (CNN runs
+               internally to build the obs vector, but classification label
+               is hidden). Fixed-assist demo mode, like human_cnn.
+  human_cnn_rl CNN identifies AND RL recommends from round 1; human decides
+               the action. Fixed-assist demo mode, like human_cnn.
 
   NOTE: you can swap classifier and recommenders to other types.
   Default is CNN and Deep Q learning
@@ -49,6 +57,7 @@ from gameplay.constants import (
     CNN_CONFIDENCE_HIGH,
     CNN_CONFIDENCE_MID,
     DATA_DIR,
+    IMAGE_BLUR_START_ROUND,
     RL_MODEL_PATH,
     SHIFT_LENGTH,
 )
@@ -103,7 +112,11 @@ def _make_components(
         displayed to the player.
     """
     if mode == "human":
-        return None, None, False, False
+        # Components exist from the start so they're ready the instant round
+        # IMAGE_BLUR_START_ROUND begins — the UI itself (via ai_starts_round)
+        # holds the classifier label / recommendation hidden and images sharp
+        # until then, so round 1 still plays as pure human triage.
+        return CNNClassifier(img_data_root=data_dir), RLRecommender(), False, True
 
     if mode == "machine":
         return CNNClassifier(img_data_root=data_dir), RLRecommender(), True, True
@@ -176,6 +189,10 @@ class Main:
             recommender=recommender,
             auto_execute=auto_execute,
             show_classifier_label=show_classifier_label,
+            # Only plain "human" mode gates AI display/blur by round — the
+            # human_cnn/human_rl/human_cnn_rl demo modes show assistance
+            # from round 1, same as always.
+            ai_starts_round=IMAGE_BLUR_START_ROUND if mode == "human" else None,
         )
 
     def _run_auto(
@@ -260,7 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["human", "machine", "human_cnn", "human_rl", "human_cnn_rl", "auto"],
         help=(
             "Game mode (default: %(default)s). "
-            "human=pure human play; "
+            "human=round 1 pure human, round 2+ adds AI assist + blurred images; "
             "machine=RL plays step-by-step with Advance Turn button; "
             "human_cnn=CNN classifies, human decides; "
             "human_rl=RL recommends action, human decides (CNN runs internally, label hidden); "
