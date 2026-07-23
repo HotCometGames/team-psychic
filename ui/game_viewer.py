@@ -16,6 +16,7 @@ _ICON_VALUE = "⭐"  # star
 _ICON_CURED = "\U0001FA79"  # bandage — injured survivors healed by a doctor
 _ICON_CONTINUE = "➡"  # arrow
 _ICON_RULES = "\U0001F4CB"  # clipboard — game-rules screen shown once at start
+_ICON_FOG = "\U0001F32B"  # fog — round-2 briefing screen (blur mechanic)
 
 
 class GameViewer:
@@ -434,6 +435,105 @@ class GameViewer:
         tk.Button(
             outer,
             text=f"Start Game  {_ICON_CONTINUE}",
+            font=("Arial", 16, "bold"),
+            bg=UI_COLORS["btn_save"],
+            fg="black",
+            activebackground="black",
+            activeforeground=UI_COLORS["fg"],
+            relief=tk.FLAT,
+            bd=0,
+            padx=18,
+            pady=10,
+            command=_dismiss,
+        ).pack(anchor=tk.W, padx=28, pady=(16, 20))
+
+    def display_round2_briefing(self, on_start: "Callable[[], None]") -> None:
+        """Render the one-time briefing shown between Round 1's end screen and Round 2.
+
+        Same full-window overlay treatment as display_rules(). Explains the
+        Round 2 blur mechanic before gameplay resumes; the caller is
+        responsible for only invoking this ahead of Round 2 specifically
+        (see the round_num check around _on_continue in ui.py).
+
+        Args:
+            on_start: Callback fired by the "Enter Round 2" button, right
+                after this screen destroys itself.
+        """
+        margin = 20
+        outer = tk.Frame(
+            self._root,
+            bg=UI_COLORS["panel"],
+            highlightbackground=UI_COLORS["card_border"],
+            highlightthickness=1,
+        )
+        outer.place(
+            x=margin,
+            y=margin,
+            width=self._w - 2 * margin,
+            height=self._h - 2 * margin,
+        )
+        outer.lift()
+
+        tk.Label(
+            outer,
+            text=f"{_ICON_FOG}  ROUND 2",
+            font=("Arial", 28, "bold"),
+            bg=UI_COLORS["panel"],
+            fg=UI_COLORS["fg"],
+        ).pack(anchor=tk.W, padx=28, pady=(24, 16))
+
+        sections = [
+            (
+                "WHAT'S CHANGED",
+                "The horde's gotten close enough that your headlights are "
+                "the only thing cutting through the dark — and it's not "
+                "enough. You won't be able to see who's standing in the "
+                "road anymore. Every image this round is blurred.",
+            ),
+            (
+                "TRUST THE CNN",
+                "Since you can't judge them by sight, you'll have to rely "
+                "on the CNN classifier's prediction instead. Check its "
+                "label and confidence before deciding — a low-confidence "
+                "call is a bigger gamble than a high-confidence one.",
+            ),
+            (
+                "EVERYTHING ELSE IS THE SAME",
+                "Skip, Squish, and Save still cost the same distance. "
+                "Capacity, Engineers, and Medics all carry over exactly "
+                "like Round 1. Only what you can see has changed.",
+            ),
+        ]
+
+        body = tk.Frame(outer, bg=UI_COLORS["panel"])
+        body.pack(anchor=tk.W, fill=tk.BOTH, expand=True, padx=28)
+
+        for header, text in sections:
+            tk.Label(
+                body,
+                text=header,
+                font=("Arial", 16, "bold"),
+                bg=UI_COLORS["panel"],
+                fg=UI_COLORS["accent"],
+            ).pack(anchor=tk.W, pady=(10, 2))
+            tk.Label(
+                body,
+                text=text,
+                font=("Arial", 14),
+                bg=UI_COLORS["panel"],
+                fg=UI_COLORS["fg"],
+                justify=tk.LEFT,
+                anchor="w",
+                wraplength=self._w - 2 * margin - 56,
+            ).pack(anchor=tk.W)
+
+        def _dismiss() -> None:
+            outer.destroy()
+            on_start()
+
+        tk.Button(
+            outer,
+            text=f"Enter Round 2  {_ICON_CONTINUE}",
             font=("Arial", 16, "bold"),
             bg=UI_COLORS["btn_save"],
             fg="black",
