@@ -568,9 +568,6 @@ class UI:
             ).value
 
         return {
-            "date": now.strftime("%Y-%m-%d"),
-            "time": now.strftime("%H:%M:%S"),        # e.g., "16:03:05"
-
             "predicted_class": predicted_class,
             "recommended_action": recommended_action,
             "confidence": confidence,
