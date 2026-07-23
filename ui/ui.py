@@ -108,7 +108,7 @@ class UI:
         horde_meter: Ambulance-vs-horde distance meter — the round ends when
             the horde catches the ambulance (caught) or the ambulance reaches
             camp (round complete), replacing the old shift-clock end condition.
-        value_label: Label displaying the current humanoid's value and category.
+        value_label: Label used for on-screen prompts during save/squish selection.
     """
 
     root: tk.Tk
@@ -404,13 +404,12 @@ class UI:
         # --- Value display ---
         self.value_label = tk.Label(
             self.root,
-            text="Value: — / —",
+            text="",
             font=("Arial", 14),
             bg=UI_COLORS["bg"],
             fg=UI_COLORS["fg"],
         )
         self.value_label.place(x=math.floor(0.05 * w), y=math.floor(0.88 * h))
-        self.value_label.config(text=self._value_label_text(self.humanoid.value))
 
         # --- Machine output display (classifier label + recommender label) ---
         self._info_label = None
@@ -708,7 +707,7 @@ class UI:
 
             # Refresh classifier/recommender output and value label for the new humanoid
             self._update_info_display(scorekeeper)
-            self.value_label.config(text=self._value_label_text(self.humanoid.value))
+            self.value_label.config(text="")
             self.button_menu.disable_buttons(
                 len(data_parser.unvisited),
                 scorekeeper.at_capacity(),
@@ -747,30 +746,12 @@ class UI:
         img_paths = [join(data_fp, h.fp) for h in self.humanoids]
         self.game_viewer.create_photos(img_paths)
         self._update_info_display(scorekeeper)
-        self.value_label.config(text=self._value_label_text(self.humanoid.value))
+        self.value_label.config(text="")
         self.update_ui(scorekeeper)
         self.button_menu.disable_buttons(
             len(data_parser.unvisited),
             scorekeeper.at_capacity(),
         )
-
-    @staticmethod
-    def _value_label_text(value: float) -> str:
-        """Format a humanoid value for display as 'Value: {float} / {category}'.
-
-        Args:
-            value: Float in [0.0, 1.0]. Values outside this range are clamped.
-
-        Returns:
-            Display string, e.g. ``'Value: 0.73 / HIGH'``.
-        """
-        categories = ["VERY LOW", "LOW", "NEUTRAL", "HIGH", "VERY HIGH"]
-        # Clamp to [0.0, 1.0] before binning — guards against negative values
-        # (which would produce bin_idx=-1, returning categories[-1]="VERY HIGH" by mistake)
-        # and values > 1.0 (which would produce bin_idx > 4, raising IndexError).
-        clamped = max(0.0, min(1.0, value))
-        bin_idx = min(int(clamped * 5), 4)
-        return f"Value: {value:.2f} / {categories[bin_idx]}"
 
     def _create_header(self, w: int) -> None:
         """Place game and BWSI logos across the top of the window.
