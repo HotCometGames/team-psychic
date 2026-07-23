@@ -728,7 +728,17 @@ class UI:
             if not is_final_round:
 
                 def _on_continue() -> None:
-                    self._start_next_round(data_fp, data_parser, scorekeeper)
+                    # Round 2 is the only round with the blur mechanic, so
+                    # the briefing only shows ahead of it, not before every
+                    # round transition in general.
+                    if self.round_num == 1:
+                        self.game_viewer.display_round2_briefing(
+                            on_start=lambda: self._start_next_round(
+                                data_fp, data_parser, scorekeeper
+                            )
+                        )
+                    else:
+                        self._start_next_round(data_fp, data_parser, scorekeeper)
 
                 on_continue = _on_continue
             else:
