@@ -409,7 +409,7 @@ class UI:
             bg=UI_COLORS["bg"],
             fg=UI_COLORS["fg"],
         )
-        self.value_label.place(x=math.floor(0.05 * w), y=math.floor(0.88 * h))
+        self.value_label.place(x=math.floor(0.75 * w), y=math.floor(0.02 * h))
         self.value_label.config(text=self._value_label_text(self.humanoid.value))
 
         # --- Machine output display (classifier label + recommender label) ---
@@ -418,17 +418,20 @@ class UI:
             self._info_label = tk.Label(
                 self.root,
                 text="",
-                font=("Arial", 14),
+                font=("Arial", 11, "bold"),
                 justify=tk.LEFT,
                 anchor="w",
-                bg=UI_COLORS["bg"],
-                fg=UI_COLORS["fg"],
+                bg="#1a1a1a",
+                fg="#00FF66",
+                padx=8,
+                pady=6,
+                bd=1,
+                relief=tk.SOLID,
             )
             self._info_label.place(
                 x=math.floor(0.75 * w),
-                y=math.floor(0.1 * h),
-                width=math.floor(0.5 * w),
-                height=math.floor(0.125 * h),
+                y=math.floor(0.18 * h),
+                width=math.floor(0.22 * w),
             )
             # Show initial classification/recommendation for the first humanoid
             self._update_info_display(scorekeeper)
@@ -565,6 +568,9 @@ class UI:
             ).value
 
         return {
+            "date": now.strftime("%Y-%m-%d"),
+            "time": now.strftime("%H:%M:%S"),        # e.g., "16:03:05"
+
             "predicted_class": predicted_class,
             "recommended_action": recommended_action,
             "confidence": confidence,
@@ -582,45 +588,46 @@ class UI:
         self.capacity_meter.update_fill(self.saved_passengers)
 
     def _update_info_display(self, scorekeeper: ScoreKeeper) -> None:
-        """Refresh the classifier/recommender output label for the current humanoid.
-
-        Computes probs once from the classifier, caches them in
-        ``self._last_probs`` for reuse by ``_get_log_context``, and passes them
-        to the recommender — a single forward pass per turn regardless of mode.
-
-        Args:
-            scorekeeper: ScoreKeeper passed to the recommender for context.
-        """
+        """Refresh the classifier/recommender output label for the current humanoid."""
         if self._info_label is None:
             return
         lines = []
         self._last_probs = []
+        
+        # Friendly side labels for multi-image targets
+        side_names = ["Left Target", "Right Target"]
+
         for idx, h in enumerate(self.humanoids):
-            prefix = f"Img {idx + 1}: " if len(self.humanoids) > 1 else ""
+            if len(self.humanoids) > 1:
+                prefix = f"{side_names[idx] if idx < 2 else f'Target {idx+1}'}: "
+            else:
+                prefix = "Target: "
+
             probs = None
 
             if self.classifier is not None:
                 probs = self.classifier.classify(h)
-                self._last_probs.append(probs)  # cache for _get_log_context — single forward pass
+                self._last_probs.append(probs)  # cache for _get_log_context
                 
                 if self._show_classifier_label:
                     label, confidence = probs_to_class(probs)
-                    lines.append(f"{prefix} Classified as: {label.value} ({confidence:.0%})")
+                    lines.append(f"{prefix}{label.value.capitalize()} ({confidence:.0%})")
                     if label.value == "healthy" and hasattr(self.classifier, "classify_role"):
                         role_probs = self.classifier.classify_role(h, state_probs=probs)
                         if role_probs is not None:
                             role_names = ("civilian", "medic", "engineer")
                             role_idx = int(np.argmax(role_probs))
                             lines.append(
-                                f"{prefix} Role: {role_names[role_idx]} "
+                                f"  ↳ Role: {role_names[role_idx]} "
                                 f"({float(role_probs[role_idx]):.0%})"
                             )
             
             if self.recommender is not None and probs is not None:
                 action = self.recommender.recommend(h, probs, scorekeeper)
-                self._last_recommended_action = action.value  # cache for _get_log_context
+                self._last_recommended_action = action.value
                 lines.append(f"Suggested: {action.value}")
-        self._info_label.config(text="\n".join(lines))
+
+        self._info_label.config(text="\n\n".join(lines))
 
     def get_next(
         self,

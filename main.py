@@ -177,6 +177,8 @@ class Main:
             auto_execute=auto_execute,
             show_classifier_label=show_classifier_label,
         )
+        
+
 
     def _run_auto(
         self,
