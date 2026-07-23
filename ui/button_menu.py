@@ -54,6 +54,20 @@ class ButtonMenu:
         self.buttons = self._create_buttons(self.canvas, items)
         self._create_menu(self.canvas, self.buttons)
 
+    def set_text(self, base_name: str, text: str) -> None:
+        """Update one button's display text in place.
+
+        Used to keep distance labels (e.g. ``"Skip [+10 ft]"``) honest once
+        the engineer speed bonus starts stacking on top of the base value.
+
+        Args:
+            base_name: Action key (e.g. ``"Skip"``). No-op if absent — machine
+                mode's single "Advance turn" button has no Skip/Squish/Save keys.
+            text: New button text.
+        """
+        if base_name in self.buttons:
+            self.buttons[base_name].config(text=text)
+
     def disable_all(self) -> None:
         """Unconditionally disable all buttons.
 

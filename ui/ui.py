@@ -609,12 +609,34 @@ class UI:
         }
 
     def update_ui(self, scorekeeper: ScoreKeeper) -> None:
-        """Update the capacity meter to reflect current game state.
+        """Update the capacity meter and action button labels for the current state.
 
         Args:
             scorekeeper: ScoreKeeper with updated ambulance state.
         """
         self.capacity_meter.update_fill(self.saved_passengers)
+        self._refresh_button_labels()
+
+    def _refresh_button_labels(self) -> None:
+        """Update Skip/Squish/Save button text to reflect the engineer speed bonus.
+
+        Button labels are static text at construction time otherwise — once an
+        engineer's bonus starts stacking, the buttons would silently move the
+        ambulance farther than their printed ``[+N ft]`` without this. No-op in
+        machine mode, which has no Skip/Squish/Save keys (only "Advance turn").
+        """
+        if self._auto_execute:
+            return
+        self.button_menu.set_text(
+            "Skip", f"Skip [+{HordeDistance.SKIP.value + self.engineer_bonus_ft:.0f} ft]"
+        )
+        self.button_menu.set_text(
+            "Squish",
+            f"Squish [+{HordeDistance.SQUISH.value + self.engineer_bonus_ft:.0f} ft]",
+        )
+        self.button_menu.set_text(
+            "Save", f"Save [+{HordeDistance.SAVE.value + self.engineer_bonus_ft:.0f} ft]"
+        )
 
     def _update_info_display(self, scorekeeper: ScoreKeeper) -> None:
         """Refresh the classifier/recommender output label for the current humanoid.
