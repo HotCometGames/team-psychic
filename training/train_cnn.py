@@ -73,7 +73,7 @@ from models.RoleCNN import RoleCNN  # noqa: E402
 
 
 # ── Hyperparameters ────────────────────────────────────────────────────────────
-NUM_EPOCHS: int = 10
+NUM_EPOCHS: int = 2
 BATCH_SIZE: int = 8
 LEARNING_RATE: float = 0.001
 VAL_SPLIT: float = 0.2

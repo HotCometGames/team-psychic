@@ -89,6 +89,7 @@ def test_get_random_real_sequential_exhaustion_raises_value_error():
             "Filename": ["a.png", "b.png", "c.png"],
             "Class": ["Default", "Default", "Zombie"],
             "Injured": [False, True, False],
+            "Role": ["civilian", "civilian", "civilian"],
         }
     )
     parser = DataParser(data_dir="data")
@@ -154,7 +155,14 @@ def test_datarow_to_state_nondefault_injured_is_corpse():
 def test_get_random_raises_on_empty_filename():
     """get_random() raises ValueError when Filename is an empty string."""
     parser = DataParser(data_dir="data")
-    bad_df = pd.DataFrame({"Filename": [""], "Class": ["Default"], "Injured": [False]})
+    bad_df = pd.DataFrame(
+        {
+            "Filename": [""],
+            "Class": ["Default"],
+            "Injured": [False],
+            "Role": ["civilian"],
+        }
+    )
     parser.df = bad_df
     parser.unvisited = set(bad_df.index)
     parser.visited = []
@@ -166,7 +174,12 @@ def test_get_random_raises_on_non_string_filename():
     """get_random() raises ValueError when Filename is None (non-string)."""
     parser = DataParser(data_dir="data")
     bad_df = pd.DataFrame(
-        {"Filename": [None], "Class": ["Default"], "Injured": [False]}
+        {
+            "Filename": [None],
+            "Class": ["Default"],
+            "Injured": [False],
+            "Role": ["civilian"],
+        }
     )
     parser.df = bad_df
     parser.unvisited = set(bad_df.index)
@@ -191,6 +204,7 @@ def test_get_random_no_replacement():
             ],
             "Class": ["Default", "Default", "Zombie"],
             "Injured": [False, True, False],
+            "Role": ["civilian", "civilian", "civilian"],
         }
     )
     parser = DataParser(data_dir="data")
@@ -253,6 +267,7 @@ def test_reset_restores_full_unvisited_pool():
             ],
             "Class": ["Default", "Default", "Zombie"],
             "Injured": [False, True, False],
+            "Role": ["civilian", "civilian", "civilian"],
         }
     )
     parser = DataParser(data_dir="data")

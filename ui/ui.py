@@ -51,8 +51,10 @@ from gameplay.constants import (
     AMBULANCE_CAPACITY,
     CNN_CONFIDENCE_HIGH,
     CNN_CONFIDENCE_MID,
+    ENGINEER_SPEED_BONUS,
     HORDE_INITIAL_DISTANCE,
     HORDE_MAX_DISTANCE,
+    IMAGE_BLUR_START_ROUND,
     MAX_ROUNDS,
     UI_COLORS,
     WINDOW_HEIGHT,
@@ -108,7 +110,7 @@ class UI:
         horde_meter: Ambulance-vs-horde distance meter — the round ends when
             the horde catches the ambulance (caught) or the ambulance reaches
             camp (round complete), replacing the old shift-clock end condition.
-        value_label: Label displaying the current humanoid's value and category.
+        value_label: Label used for on-screen prompts during save/squish selection.
     """
 
     root: tk.Tk
@@ -117,6 +119,7 @@ class UI:
     recommender: ActionRecommender | None
     _auto_execute: bool
     _show_classifier_label: bool
+    _ai_starts_round: int | None
     round_num: int
     total_saved: int
     total_killed: int
@@ -145,6 +148,7 @@ class UI:
         recommender: ActionRecommender | None = None,
         auto_execute: bool = False,
         show_classifier_label: bool = True,
+        ai_starts_round: int | None = None,
     ) -> None:
         """Build the game window and enter the Tkinter main loop.
 
@@ -164,6 +168,13 @@ class UI:
                 predicted class and confidence are shown on screen. If False,
                 the classifier still runs (to supply probs to the recommender)
                 but the label is hidden.
+            ai_starts_round: If set, the classifier/recommender output stays
+                hidden and images stay sharp until ``round_num`` reaches this
+                value — round 1 plays as pure human triage, and AI assistance
+                plus blurred images both start together from this round on.
+                ``None`` (default) means AI assistance (if any classifier/
+                recommender was passed) is visible from round 1, as in the
+                human_cnn/human_rl/human_cnn_rl demo modes.
         """
         w, h = WINDOW_WIDTH, WINDOW_HEIGHT
         self.root = tk.Tk()
@@ -186,6 +197,7 @@ class UI:
             )
         self._auto_execute = auto_execute and recommender is not None
         self._show_classifier_label = show_classifier_label
+        self._ai_starts_round = ai_starts_round
         self._last_probs = (
             None  # cached per-turn classifier output; set by _update_info_display
         )
@@ -203,6 +215,7 @@ class UI:
         self.total_cured = 0
         self.round_scores = []  # per-round score dicts, appended at each round-end
         self.saved_passengers = []
+        self.engineer_bonus_ft = 0.0
         self.humanoid = data_parser.get_random()
         self.humanoids = [self.humanoid]
 
@@ -227,7 +240,7 @@ class UI:
                 scorekeeper.skip(self.humanoid)
                 self.horde_meter.advance(
                     zombie_delta=HordeDistance.ZOMBIE.value,
-                    ambulance_delta=HordeDistance.SKIP.value,
+                    ambulance_delta=HordeDistance.SKIP.value + self.engineer_bonus_ft,
                 )
                 self.update_ui(scorekeeper)
                 self.get_next(data_fp, data_parser, scorekeeper)
@@ -266,7 +279,8 @@ class UI:
 
                         self.horde_meter.advance(
                             zombie_delta=HordeDistance.ZOMBIE.value,
-                            ambulance_delta=HordeDistance.SQUISH.value,
+                            ambulance_delta=HordeDistance.SQUISH.value
+                            + self.engineer_bonus_ft,
                         )
 
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
@@ -289,7 +303,8 @@ class UI:
                     scorekeeper.squish(self.humanoid)
                     self.horde_meter.advance(
                         zombie_delta=HordeDistance.ZOMBIE.value,
-                        ambulance_delta=HordeDistance.SQUISH.value,
+                        ambulance_delta=HordeDistance.SQUISH.value
+                        + self.engineer_bonus_ft,
                     )
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
@@ -314,6 +329,7 @@ class UI:
                         )
                         scorekeeper.save(selected_humanoid)
                         self.saved_passengers.append(selected_humanoid)
+                        self._apply_engineer_bonus(selected_humanoid)
 
                         # Log any unchosen image(s) as skipped
                         for idx, h in enumerate(self.humanoids):
@@ -328,7 +344,8 @@ class UI:
 
                         self.horde_meter.advance(
                             zombie_delta=HordeDistance.ZOMBIE.value,
-                            ambulance_delta=HordeDistance.SAVE.value,
+                            ambulance_delta=HordeDistance.SAVE.value
+                            + self.engineer_bonus_ft,
                         )
 
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
@@ -350,28 +367,14 @@ class UI:
                     )
                     scorekeeper.save(self.humanoid)
                     self.saved_passengers.append(self.humanoid)
+                    self._apply_engineer_bonus(self.humanoid)
                     self.horde_meter.advance(
                         zombie_delta=HordeDistance.ZOMBIE.value,
-                        ambulance_delta=HordeDistance.SAVE.value,
+                        ambulance_delta=HordeDistance.SAVE.value + self.engineer_bonus_ft,
                     )
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
 
-            def _on_scram() -> None:
-                self.button_menu.disable_all()
-                scorekeeper.log_turn(
-                    self.humanoid,
-                    "scram",
-                    **self._get_log_context(scorekeeper),
-                )
-                scorekeeper.scram(self.humanoid)
-                # No HordeDistance member for scram yet (not currently a button) —
-                # a big ambulance jump matches what scram represents (driving away).
-                self.horde_meter.advance(
-                    zombie_delta=HordeDistance.ZOMBIE.value, ambulance_delta=40
-                )
-                self.update_ui(scorekeeper)
-                self.get_next(data_fp, data_parser, scorekeeper)
 
             user_buttons = [
                 (f"Skip [+{HordeDistance.SKIP.value} ft]", _on_skip),
@@ -404,13 +407,12 @@ class UI:
         # --- Value display ---
         self.value_label = tk.Label(
             self.root,
-            text="Value: — / —",
+            text="",
             font=("Arial", 14),
             bg=UI_COLORS["bg"],
             fg=UI_COLORS["fg"],
         )
         self.value_label.place(x=math.floor(0.05 * w), y=math.floor(0.88 * h))
-        self.value_label.config(text=self._value_label_text(self.humanoid.value))
 
         # --- Machine output display (classifier label + recommender label) ---
         self._info_label = None
@@ -521,6 +523,39 @@ class UI:
     # UI update helpers
     # ------------------------------------------------------------------
 
+    def _apply_engineer_bonus(self, humanoid: Humanoid) -> None:
+        """Bump the ambulance's permanent speed bonus if ``humanoid`` is a live engineer.
+
+        Takes effect starting with the very ``horde_meter.advance()`` call for
+        this same Save action (call this before that), and every action for
+        the rest of the round after. Stacks additively — each engineer saved
+        adds another ``ENGINEER_SPEED_BONUS`` ft on top of the running total.
+        Only counts a *living* engineer (injured or healthy), matching the
+        same alive-subset rule ``ScoreKeeper`` uses for ``ambulance_engineers``.
+
+        Args:
+            humanoid: The humanoid just passed to ``scorekeeper.save()``.
+        """
+        if humanoid.is_engineer() and (humanoid.is_injured() or humanoid.is_healthy()):
+            self.engineer_bonus_ft += ENGINEER_SPEED_BONUS
+
+    def _should_blur_images(self) -> bool:
+        """Return True when humanoid images should be blurred for the current round.
+
+        Blur now starts in round 2 for every mode, regardless of whether the
+        AI assistance display is active yet.
+        """
+        return self.round_num >= IMAGE_BLUR_START_ROUND
+
+    def _ai_display_active(self) -> bool:
+        """Return True if classifier/recommender output should be shown right now.
+
+        True immediately when ``ai_starts_round`` is ``None`` (human_cnn/
+        human_rl/human_cnn_rl demo modes). For plain human mode
+        (``ai_starts_round`` set), stays False until ``round_num`` reaches it.
+        """
+        return self._ai_starts_round is None or self.round_num >= self._ai_starts_round
+
     def _get_log_context(self, scorekeeper: ScoreKeeper, target_humanoid: Humanoid | None = None) -> dict:
         """Return keyword args for ``scorekeeper.log_turn()`` with classifier context.
 
@@ -584,12 +619,34 @@ class UI:
         }
 
     def update_ui(self, scorekeeper: ScoreKeeper) -> None:
-        """Update the capacity meter to reflect current game state.
+        """Update the capacity meter and action button labels for the current state.
 
         Args:
             scorekeeper: ScoreKeeper with updated ambulance state.
         """
         self.capacity_meter.update_fill(self.saved_passengers)
+        self._refresh_button_labels()
+
+    def _refresh_button_labels(self) -> None:
+        """Update Skip/Squish/Save button text to reflect the engineer speed bonus.
+
+        Button labels are static text at construction time otherwise — once an
+        engineer's bonus starts stacking, the buttons would silently move the
+        ambulance farther than their printed ``[+N ft]`` without this. No-op in
+        machine mode, which has no Skip/Squish/Save keys (only "Advance turn").
+        """
+        if self._auto_execute:
+            return
+        self.button_menu.set_text(
+            "Skip", f"Skip [+{HordeDistance.SKIP.value + self.engineer_bonus_ft:.0f} ft]"
+        )
+        self.button_menu.set_text(
+            "Squish",
+            f"Squish [+{HordeDistance.SQUISH.value + self.engineer_bonus_ft:.0f} ft]",
+        )
+        self.button_menu.set_text(
+            "Save", f"Save [+{HordeDistance.SAVE.value + self.engineer_bonus_ft:.0f} ft]"
+        )
 
     def _update_info_display(self, scorekeeper: ScoreKeeper) -> None:
         """Refresh the classifier/recommender output label for the current humanoid.
@@ -630,7 +687,10 @@ class UI:
                 action = self.recommender.recommend(h, probs, scorekeeper)
                 self._last_recommended_action = action.value  # cache for _get_log_context
                 lines.append(f"Suggested: {action.value}")
-        self._info_label.config(text="\n".join(lines))
+        # probs/recommendation are still computed and cached above regardless
+        # (needed for _get_log_context's per-turn logging either way) — only
+        # the on-screen text is held back until AI display is actually active.
+        self._info_label.config(text="\n".join(lines) if self._ai_display_active() else "")
 
     def get_next(
         self,
@@ -675,15 +735,33 @@ class UI:
                 scorekeeper.save_log()
 
             # No more rounds left in this run — omit the continue button so
-            # display_score() shows a run-complete screen instead.
+            # display_score() shows a run-complete screen with a restart
+            # button instead.
             is_final_round = self.round_num >= MAX_ROUNDS
             on_continue = None
+            on_restart = None
             if not is_final_round:
 
                 def _on_continue() -> None:
-                    self._start_next_round(data_fp, data_parser, scorekeeper)
+                    # Round 2 is the only round with the blur mechanic, so
+                    # the briefing only shows ahead of it, not before every
+                    # round transition in general.
+                    if self.round_num == 1:
+                        self.game_viewer.display_round2_briefing(
+                            on_start=lambda: self._start_next_round(
+                                data_fp, data_parser, scorekeeper
+                            )
+                        )
+                    else:
+                        self._start_next_round(data_fp, data_parser, scorekeeper)
 
                 on_continue = _on_continue
+            else:
+
+                def _on_restart() -> None:
+                    self._restart_game(data_fp, data_parser, scorekeeper)
+
+                on_restart = _on_restart
 
             self.game_viewer.display_score(
                 score,
@@ -699,6 +777,7 @@ class UI:
                 # Once round 1 is in the books, show its own numbers alongside
                 # this round's and the running totals (3 boards on the final screen).
                 round1_score=self.round_scores[0] if len(self.round_scores) >= 2 else None,
+                on_restart=on_restart,
             )
         else:
             show_two = random() < 0.20
@@ -714,11 +793,11 @@ class UI:
             self._last_recommended_action = None
 
             img_paths = [join(data_fp, h.fp) for h in self.humanoids]
-            self.game_viewer.create_photos(img_paths)
+            self.game_viewer.create_photos(img_paths, blur=self._should_blur_images())
 
             # Refresh classifier/recommender output and value label for the new humanoid
             self._update_info_display(scorekeeper)
-            self.value_label.config(text=self._value_label_text(self.humanoid.value))
+            self.value_label.config(text="")
             self.button_menu.disable_buttons(
                 len(data_parser.unvisited),
                 scorekeeper.at_capacity(),
@@ -745,6 +824,54 @@ class UI:
         """
         self.round_num += 1
         self.saved_passengers.clear()
+        self.engineer_bonus_ft = 0.0
+        self._begin_round(data_fp, data_parser, scorekeeper)
+
+    def _restart_game(
+        self,
+        data_fp: str,
+        data_parser: DataParser,
+        scorekeeper: ScoreKeeper,
+    ) -> None:
+        """Reset the whole run back to round 1 — fired by the final run-complete screen.
+
+        Unlike ``_start_next_round`` (which keeps career totals running), this
+        zeroes everything: round number, career totals, saved passengers, and
+        the engineer speed bonus — a genuine fresh start, not just another round.
+
+        Args:
+            data_fp: Root path for image files.
+            data_parser: DataParser to refill for the new run.
+            scorekeeper: ScoreKeeper to reset for the new run.
+        """
+        self.round_num = 1
+        self.total_saved = 0
+        self.total_killed = 0
+        self.total_saved_value = 0.0
+        self.total_cured = 0
+        self.round_scores = []
+        self.saved_passengers = []
+        self.engineer_bonus_ft = 0.0
+        self._begin_round(data_fp, data_parser, scorekeeper)
+
+    def _begin_round(
+        self,
+        data_fp: str,
+        data_parser: DataParser,
+        scorekeeper: ScoreKeeper,
+    ) -> None:
+        """Shared first-turn setup for both a new round and a full restart.
+
+        ``scorekeeper.reset()`` is idempotent — safe to call again even when
+        ``get_next()`` already called it for logging purposes — and
+        ``data_parser.reset()`` refills the unvisited pool so the round has
+        the full dataset to draw from.
+
+        Args:
+            data_fp: Root path for image files.
+            data_parser: DataParser to refill.
+            scorekeeper: ScoreKeeper to reset.
+        """
         scorekeeper.reset()
         data_parser.reset()
         self.horde_meter.reset()
@@ -755,32 +882,14 @@ class UI:
         self._last_probs = None
         self._last_recommended_action = None
         img_paths = [join(data_fp, h.fp) for h in self.humanoids]
-        self.game_viewer.create_photos(img_paths)
+        self.game_viewer.create_photos(img_paths, blur=self._should_blur_images())
         self._update_info_display(scorekeeper)
-        self.value_label.config(text=self._value_label_text(self.humanoid.value))
+        self.value_label.config(text="")
         self.update_ui(scorekeeper)
         self.button_menu.disable_buttons(
             len(data_parser.unvisited),
             scorekeeper.at_capacity(),
         )
-
-    @staticmethod
-    def _value_label_text(value: float) -> str:
-        """Format a humanoid value for display as 'Value: {float} / {category}'.
-
-        Args:
-            value: Float in [0.0, 1.0]. Values outside this range are clamped.
-
-        Returns:
-            Display string, e.g. ``'Value: 0.73 / HIGH'``.
-        """
-        categories = ["VERY LOW", "LOW", "NEUTRAL", "HIGH", "VERY HIGH"]
-        # Clamp to [0.0, 1.0] before binning — guards against negative values
-        # (which would produce bin_idx=-1, returning categories[-1]="VERY HIGH" by mistake)
-        # and values > 1.0 (which would produce bin_idx > 4, raising IndexError).
-        clamped = max(0.0, min(1.0, value))
-        bin_idx = min(int(clamped * 5), 4)
-        return f"Value: {value:.2f} / {categories[bin_idx]}"
 
     def _create_header(self, w: int) -> None:
         """Place game and BWSI logos across the top of the window.
