@@ -438,11 +438,11 @@ class UI:
             # when the player closes the window after a game that already called
             # save_log() at game-end. Also catches mid-game window closes where
             # the current episode was never committed.
-            if self.log and (
-                scorekeeper.logger
-                or scorekeeper._all_logs_written < len(scorekeeper.all_logs)
-            ):
-                scorekeeper.save_log()
+            # if self.log and (
+            #     scorekeeper.logger
+            #     or scorekeeper._all_logs_written < len(scorekeeper.all_logs)
+            # ):
+            #     scorekeeper.save_log()
             self.root.destroy()
 
         self.root.protocol("WM_DELETE_WINDOW", _on_close)
@@ -542,6 +542,7 @@ class UI:
         h = target_humanoid if target_humanoid is not None else self.humanoid
 
         predicted_class = None
+        predicted_role = None
         recommended_action = None
         confidence = None
 
@@ -552,11 +553,14 @@ class UI:
         if probs is not None:
             predicted_class = int(np.argmax(probs))
             max_prob = float(np.max(probs))
-            confidence = (
-                "high"
-                if max_prob >= CNN_CONFIDENCE_HIGH
-                else "mid" if max_prob >= CNN_CONFIDENCE_MID else "low"
-            )
+            confidence = max_prob  # Pass as raw float (0.0 - 1.0) for numeric percentage formatting
+
+            # Fetch predicted role if the classifier supports role classification
+            if hasattr(self.classifier, "classify_role"):
+                role_probs = self.classifier.classify_role(h, state_probs=probs)
+                if role_probs is not None:
+                    predicted_role = int(np.argmax(role_probs))
+
         if self.recommender is not None and probs is not None:
             # Use cached action from _update_info_display — avoids a second recommend()
             # call that could return a different result for stochastic recommenders.
@@ -564,13 +568,19 @@ class UI:
                 h, probs, scorekeeper
             ).value
 
+        is_split_screen = len(getattr(self, "humanoids", [])) > 1
+        people_in_view = len(getattr(self, "humanoids", [h]))
+
         return {
             "predicted_class": predicted_class,
+            "predicted_role": predicted_role,
             "recommended_action": recommended_action,
             "confidence": confidence,
             "obs": None,
             "zombie_distance": self.horde_meter.zombie_distance,
             "ambulance_distance": self.horde_meter.ambulance_distance,
+            "is_split_screen": is_split_screen,
+            "people_in_view": people_in_view,
         }
 
     def update_ui(self, scorekeeper: ScoreKeeper) -> None:
