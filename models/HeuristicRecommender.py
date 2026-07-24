@@ -7,6 +7,13 @@ Decision rules:
 
 This is intentionally simple — override recommend() to implement
 your own decision rules, reward shaping, or threshold tuning.
+
+Note: ``scram`` has no corresponding button in human play modes. When this
+recommender's output is shown to a human (or logged), ``ui.py`` substitutes
+an actionable equivalent for display — see ``UI._scram_fallback``. This
+recommender's own return value is unchanged so machine/auto_execute mode
+(which still uses ``scram`` for real, on the old time+capacity model) keeps
+working exactly as before.
 """
 
 import numpy as np

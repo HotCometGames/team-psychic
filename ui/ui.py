@@ -60,7 +60,7 @@ from gameplay.constants import (
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
 )
-from gameplay.enums import HordeDistance
+from gameplay.enums import ActionState, HordeDistance, State
 from gameplay.humanoid import Humanoid
 from gameplay.scorekeeper import ScoreKeeper
 from models.ActionRecommender import ActionRecommender
@@ -329,7 +329,6 @@ class UI:
                         )
                         scorekeeper.save(selected_humanoid)
                         self.saved_passengers.append(selected_humanoid)
-                        self._apply_engineer_bonus(selected_humanoid)
 
                         # Log any unchosen image(s) as skipped
                         for idx, h in enumerate(self.humanoids):
@@ -347,6 +346,9 @@ class UI:
                             ambulance_delta=HordeDistance.SAVE.value
                             + self.engineer_bonus_ft,
                         )
+                        # Applied after this turn's advance — the bonus starts
+                        # with the next action, not this Save.
+                        self._apply_engineer_bonus(selected_humanoid)
 
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
                         self.humanoid = selected_humanoid
@@ -367,11 +369,13 @@ class UI:
                     )
                     scorekeeper.save(self.humanoid)
                     self.saved_passengers.append(self.humanoid)
-                    self._apply_engineer_bonus(self.humanoid)
                     self.horde_meter.advance(
                         zombie_delta=HordeDistance.ZOMBIE.value,
                         ambulance_delta=HordeDistance.SAVE.value + self.engineer_bonus_ft,
                     )
+                    # Applied after this turn's advance — the bonus starts
+                    # with the next action, not this Save.
+                    self._apply_engineer_bonus(self.humanoid)
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -526,18 +530,42 @@ class UI:
     def _apply_engineer_bonus(self, humanoid: Humanoid) -> None:
         """Bump the ambulance's permanent speed bonus if ``humanoid`` is a live engineer.
 
-        Takes effect starting with the very ``horde_meter.advance()`` call for
-        this same Save action (call this before that), and every action for
-        the rest of the round after. Stacks additively — each engineer saved
-        adds another ``ENGINEER_SPEED_BONUS`` ft on top of the running total.
-        Only counts a *living* engineer (injured or healthy), matching the
-        same alive-subset rule ``ScoreKeeper`` uses for ``ambulance_engineers``.
+        Call this AFTER this turn's ``horde_meter.advance()``, so the bonus
+        takes effect starting with the *next* action, not the Save action
+        that brought the engineer aboard. Stacks additively — each engineer
+        saved adds another ``ENGINEER_SPEED_BONUS`` ft on top of the running
+        total. Only counts a *living* engineer (injured or healthy), matching
+        the same alive-subset rule ``ScoreKeeper`` uses for ``ambulance_engineers``.
 
         Args:
             humanoid: The humanoid just passed to ``scorekeeper.save()``.
         """
         if humanoid.is_engineer() and (humanoid.is_injured() or humanoid.is_healthy()):
             self.engineer_bonus_ft += ENGINEER_SPEED_BONUS
+
+    @staticmethod
+    def _scram_fallback(probs: "np.ndarray | None") -> ActionState:
+        """Substitute an actionable equivalent for a SCRAM recommendation.
+
+        Human play only has Skip/Squish/Save buttons — there is no way to
+        act on "scram", so it must never reach the on-screen suggestion or
+        the log. Falls back to the same classifier-driven rule
+        ``HeuristicRecommender`` uses for its non-capacity branch: squish for
+        a predicted zombie/corpse, skip otherwise (can't save — scram only
+        ever comes from an at-capacity or time-exhausted state).
+
+        Args:
+            probs: Classifier probability vector, or ``None`` if no
+                classifier is set (falls back to skip).
+
+        Returns:
+            ``ActionState.SQUISH`` or ``ActionState.SKIP`` — never SCRAM.
+        """
+        if probs is not None:
+            predicted_state = list(State)[int(np.argmax(probs))]
+            if predicted_state in (State.ZOMBIE, State.CORPSE):
+                return ActionState.SQUISH
+        return ActionState.SKIP
 
     def _should_blur_images(self) -> bool:
         """Return True when humanoid images should be blurred for the current round.
@@ -595,9 +623,12 @@ class UI:
         if self.recommender is not None and probs is not None:
             # Use cached action from _update_info_display — avoids a second recommend()
             # call that could return a different result for stochastic recommenders.
-            recommended_action = self.recommender.recommend(
-                h, probs, scorekeeper
-            ).value
+            action = self.recommender.recommend(h, probs, scorekeeper)
+            if action == ActionState.SCRAM:
+                # No Scram button in human play — log the actionable
+                # equivalent, not an option the player could never take.
+                action = self._scram_fallback(probs)
+            recommended_action = action.value
 
         return {
             "predicted_class": predicted_class,
@@ -675,6 +706,10 @@ class UI:
             
             if self.recommender is not None and probs is not None:
                 action = self.recommender.recommend(h, probs, scorekeeper)
+                if action == ActionState.SCRAM:
+                    # No Scram button in human play — show the actionable
+                    # equivalent instead of a suggestion the player can't take.
+                    action = self._scram_fallback(probs)
                 self._last_recommended_action = action.value  # cache for _get_log_context
                 lines.append(f"Suggested: {action.value}")
         # probs/recommendation are still computed and cached above regardless

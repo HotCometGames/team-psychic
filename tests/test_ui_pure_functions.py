@@ -9,10 +9,40 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 from gameplay.constants import SHIFT_LENGTH
+from gameplay.enums import ActionState
 from ui.ui import UI
+
+# ---------------------------------------------------------------------------
+# UI._scram_fallback — never surface an unactionable "scram" suggestion
+# ---------------------------------------------------------------------------
+
+_PROBS_ZOMBIE = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+_PROBS_HEALTHY = np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)
+_PROBS_CORPSE = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+
+
+def test_scram_fallback_squishes_predicted_zombie():
+    """A scram recommendation with a predicted zombie falls back to squish."""
+    assert UI._scram_fallback(_PROBS_ZOMBIE) == ActionState.SQUISH
+
+
+def test_scram_fallback_squishes_predicted_corpse():
+    """A scram recommendation with a predicted corpse falls back to squish."""
+    assert UI._scram_fallback(_PROBS_CORPSE) == ActionState.SQUISH
+
+
+def test_scram_fallback_skips_predicted_healthy():
+    """A scram recommendation with a predicted healthy/injured falls back to skip (can't save)."""
+    assert UI._scram_fallback(_PROBS_HEALTHY) == ActionState.SKIP
+
+
+def test_scram_fallback_skips_when_no_probs():
+    """With no classifier (probs=None), the fallback defaults to skip."""
+    assert UI._scram_fallback(None) == ActionState.SKIP
 
 # ---------------------------------------------------------------------------
 # UI._should_blur_images — blur starts in round 2 for every mode
