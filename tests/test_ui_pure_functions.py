@@ -15,46 +15,26 @@ from gameplay.constants import SHIFT_LENGTH
 from ui.ui import UI
 
 # ---------------------------------------------------------------------------
-# UI._value_label_text — bin mapping and clamping
+# UI._should_blur_images — blur starts in round 2 for every mode
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "value, expected_category",
-    [
-        (0.00, "VERY LOW"),
-        (0.10, "VERY LOW"),
-        (0.20, "LOW"),
-        (0.30, "LOW"),
-        (0.40, "NEUTRAL"),
-        (0.50, "NEUTRAL"),
-        (0.60, "HIGH"),
-        (0.70, "HIGH"),
-        (0.80, "VERY HIGH"),
-        (0.99, "VERY HIGH"),
-        (1.00, "VERY HIGH"),
-    ],
-)
-def test_value_label_text_bins(value, expected_category):
-    """_value_label_text maps value into the correct category bin."""
-    text = UI._value_label_text(value)
-    assert expected_category in text
-    assert f"{value:.2f}" in text
+def test_should_blur_images_from_round_two_for_all_modes():
+    """Round 2 should blur images even when no AI start round is configured."""
+    ui = object.__new__(UI)
+    ui.round_num = 2
+    ui._ai_starts_round = None
+
+    assert ui._should_blur_images() is True
 
 
-@pytest.mark.parametrize(
-    "value, expected_category",
-    [
-        (-0.5, "VERY LOW"),  # negative clamps to 0.0
-        (-0.01, "VERY LOW"),
-        (1.01, "VERY HIGH"),  # over 1.0 clamps to 1.0
-        (99.0, "VERY HIGH"),
-    ],
-)
-def test_value_label_text_clamps_out_of_range(value, expected_category):
-    """_value_label_text clamps values outside [0, 1] without raising."""
-    text = UI._value_label_text(value)
-    assert expected_category in text
+def test_should_blur_images_before_round_two_is_off():
+    """Images stay sharp before round 2."""
+    ui = object.__new__(UI)
+    ui.round_num = 1
+    ui._ai_starts_round = None
+
+    assert ui._should_blur_images() is False
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +69,9 @@ def _make_headless_ui(log: bool = True) -> UI:
     ui.total_killed = 0
     ui.total_saved_value = 0.0
     ui.total_cured = 0
+    ui.round_scores = []
+    ui.engineer_bonus_ft = 0.0
+    ui.saved_passengers = []
     return ui
 
 

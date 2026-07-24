@@ -69,6 +69,21 @@ CNN_CONFIDENCE_HIGH: float = 0.75  # above this → high confidence (bin 2)
 HORDE_MAX_DISTANCE: float = 300.0  # ft from horde start (0) to camp
 HORDE_INITIAL_DISTANCE: float = 20.0  # ambulance's starting lead over the horde
 
+# Feet added to EVERY future ambulance movement this round, per engineer
+# saved (alive) — stacks additively, applies to Skip/Squish/Save/Scram alike,
+# and takes effect starting with the very action that saved the engineer.
+# Kept small so a few engineers speed things up without trivializing the
+# horde chase.
+ENGINEER_SPEED_BONUS: float = 2.0
+
+# From this round onward, humanoid images are blurred — pushes the player to
+# rely on the classifier/recommender's on-screen suggestion instead of just
+# eyeballing the raw image. Only takes effect when a classifier is active
+# (human_cnn/human_rl/human_cnn_rl/machine) — plain human mode has no AI
+# assist to fall back on, so images stay sharp there.
+IMAGE_BLUR_START_ROUND: int = 2
+IMAGE_BLUR_RADIUS: float = 10.0
+
 # UI color palette — adjust these to restyle the interface.
 UI_COLORS: dict[str, str] = {
     "bg": "#1a1a1a",  # root and canvas background
