@@ -1,5 +1,7 @@
 import math
 import tkinter as tk
+import os
+from PIL import Image, ImageTk
 from typing import Any
 
 from gameplay.constants import UI_COLORS
@@ -19,15 +21,15 @@ class CapacityMeter:
     canvas: tk.Canvas
     unit_size: int
     _units: list[int]
-    CATEGORY_COLORS = {
-        "medic": "#56E9F9",          # Cyan (Healthy Specialist)
-        "engineer": "#64EAF9",       # Cyan (Healthy Specialist)
-        "injured_medic": "#1E90FF",   # Deep Blue (Injured Specialist)
-        "injured_engineer": "#1E90FF",# Deep Blue (Injured Specialist)
-        "civilian": "#46DF46",       # Green (Healthy Civilian)
-        "injured": "#FFA500",        # Orange (Injured Civilian)
-        "zombie": "#D13C3C",         # Red (Threat)
-        "corpse": "#CB3D3D",         # Dark Red (Corpse)
+    CATEGORY_IMAGES = {
+        "medic": "ui/graphics/icons/doctor.png",
+        "engineer": "ui/graphics/icons/engineer.png",
+        "injured_medic": "ui/graphics/icons/injured.png",
+        "injured_engineer": "ui/graphics/icons/injured.png",
+        "civilian": "ui/graphics/icons/civilian.png",
+        "injured": "ui/graphics/icons/injured.png",
+        "zombie": "ui/graphics/icons/zombie.png",
+        "corpse": "ui/graphics/icons/zombie.png",
     }
 
     CATEGORY_PRIORITY = {
@@ -61,8 +63,21 @@ class CapacityMeter:
         self.canvas.place(x=math.floor(0.75 * w), y=math.floor(0.4 * h))
         self._units = []
         self.unit_size = 40
+        self._unit_icons = []
+
+        self.icon_cache: dict[str, ImageTk.PhotoImage] = {}
+        self._load_icons(self.unit_size)
+
         self.canvas.update()
         self.render(max_cap, self.unit_size)
+
+    def _load_icons(self, size: int) -> None:
+        """Load and resize icon images to fit the capacity unit square."""
+        for category, path in self.CATEGORY_IMAGES.items():
+            if os.path.exists(path):
+                with Image.open(path) as img:
+                    resized = img.resize((size, size), Image.LANCZOS)
+                    self.icon_cache[category] = ImageTk.PhotoImage(resized)
 
     def render(self, max_cap: int, size: int) -> None:
         """Draw the capacity label and all unit squares on the canvas.
@@ -82,7 +97,10 @@ class CapacityMeter:
         x = 3
         y = 50
         for _ in range(max_cap):
-            self._units.append(self.create_unit(self.canvas, x, y, size))
+            rect_id, img_id = self.create_unit(self.canvas, x, y, size)
+            self._units.append(rect_id)
+            self._unit_icons.append(img_id)
+            
             x += size * 3 // 2
             if (x + size * 3 // 2) > self._canvas_w:
                 x = 3
@@ -91,8 +109,9 @@ class CapacityMeter:
     def update_fill(self, saved_passengers: Any) -> None:
         """Update the filled/empty state of the capacity squares."""
         # 1. Reset all canvas squares to empty background
-        for unit in self._units:
-            self.canvas.itemconfig(unit, fill=UI_COLORS["panel"], outline="#555555")
+        for i in range(len(self._units)):
+            self.canvas.itemconfig(self._units[i], fill=UI_COLORS["panel"], outline="#555555")
+            self.canvas.itemconfig(self._unit_icons[i], image="")
 
         # Handle integer inputs (e.g. update_fill(0))
         if isinstance(saved_passengers, int):
@@ -147,13 +166,10 @@ class CapacityMeter:
                 break  # Prevent capacity overflow
 
             key = get_key(humanoid)
-            color = self.CATEGORY_COLORS.get(key, UI_COLORS["meter_filled"])
+            if key in self.icon_cache:
+                self.canvas.itemconfig(self._unit_icons[i], image=self.icon_cache[key])
+            
 
-            self.canvas.itemconfig(
-                self._units[i],
-                fill=color,
-                outline=color,
-            )
     @staticmethod
     def create_unit(canvas: tk.Canvas, x: float, y: float, size: int) -> int:
         """Draw a single capacity square on the canvas and return its item ID.
@@ -167,6 +183,10 @@ class CapacityMeter:
         Returns:
             Tkinter canvas item ID for the created rectangle.
         """
-        return canvas.create_rectangle(
+        rect_id = canvas.create_rectangle(
             x, y, x + size, y + size, fill=UI_COLORS["panel"], outline="#555555"
         )
+        img_id = canvas.create_image(
+            x + size // 2, y + size // 2, anchor=tk.CENTER, image=""
+        )
+        return rect_id, img_id
