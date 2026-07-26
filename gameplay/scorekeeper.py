@@ -20,7 +20,7 @@ CNN_CLASS_MAP = {
 }
 
 CNN_ROLE_MAP = {
-    0: "none",
+    0: "civilian",
     1: "medic",
     2: "engineer"
 }
@@ -82,6 +82,19 @@ class ScoreKeeper:
     remaining_time: int
     ambulance_value: float
     medics_saved: int
+
+    HEADERS = [
+        "datetime",
+        "blur",
+        "is_split",
+        "people_in_view",
+        "cnn_prediction",
+        "confidence_pct",
+        "capacity",
+        "dist_of horde",
+        "agreed_with_cnn",
+        "action_taken",
+    ]
 
     def __init__(
         self, shift_length: int, capacity: int, seed: int | None = None
@@ -153,69 +166,118 @@ class ScoreKeeper:
         predicted_class: int | None = None,
         predicted_role: int | None = None,
         recommended_action: str | None = None,
-        confidence: float | str | None = None,
         obs: list[float] | None = None,
+        confidence: float | str | None = None,
         zombie_distance: float | None = None,
         ambulance_distance: float | None = None,
-        blur: bool = False,
+        image_blurred: bool = False,
         is_split_screen: bool = False,
         people_in_view: int | None = None,
     ) -> None:
         """Append a streamlined, highly readable action entry to the current log."""
         
-        # 1. Horde Distance
+        if humanoid is None:
+            active_humanoids = []
+        elif isinstance(humanoid, list):
+            active_humanoids = [h for h in humanoid if h is not None]
+        else:
+            active_humanoids = [humanoid]
+
+        # 2. Extract detailed types/roles for people in view
+        # 2. Extract ground-truth types/roles
+        people_names = []
+        for h in active_humanoids:
+            # Check helper methods first, fallback to state/img_class attributes
+            if getattr(h, "is_zombie", lambda: False)() or str(getattr(h, "state", getattr(h, "img_class", ""))).lower() in ["zombie", "0"]:
+                name_item = "zombie"
+            elif getattr(h, "is_corpse", lambda: False)() or str(getattr(h, "state", getattr(h, "img_class", ""))).lower() in ["corpse", "dead", "3"]:
+                name_item = "corpse"
+            elif getattr(h, "is_injured", lambda: False)() or str(getattr(h, "state", getattr(h, "img_class", ""))).lower() in ["injured", "2"]:
+                name_item = "injured"
+            else:
+                role_attr = getattr(h, "role", "civilian")
+                role_val = str(getattr(role_attr, "value", role_attr) or "").lower()
+                name_item = role_val if role_val not in ["none", "", "civilian"] else "civilian"
+
+            people_names.append(name_item)
+
+        people_names_str = " | ".join(people_names) if people_names else "none"
+
+        # 3. Standardize predictions into lists
+        pred_classes = predicted_class if isinstance(predicted_class, list) else ([predicted_class] if predicted_class is not None else [])
+        pred_roles = predicted_role if isinstance(predicted_role, list) else ([predicted_role] if predicted_role is not None else [])
+
+        cnn_preds = []
+        for idx in range(len(active_humanoids)):
+            p_cls = pred_classes[idx] if idx < len(pred_classes) else None
+            p_role = pred_roles[idx] if idx < len(pred_roles) else None
+
+            cls_str = CNN_CLASS_MAP.get(p_cls, "").lower() if p_cls is not None else ""
+            role_str = CNN_ROLE_MAP.get(p_role, "").lower() if p_role is not None else ""
+
+            if cls_str in ["healthy", "default", "humanoid"]:
+                cls_str = "civilian"
+
+            if "zombie" in cls_str:
+                cnn_preds.append("zombie")
+            elif cls_str == "civilian":
+                if role_str and role_str not in ["none", "civilian"]:
+                    cnn_preds.append(role_str)
+                else:
+                    cnn_preds.append("civilian")
+            elif cls_str:
+                if role_str and role_str not in ["none", "civilian"]:
+                    cnn_preds.append(f"{cls_str} ({role_str})")
+                else:
+                    cnn_preds.append(cls_str)
+
+        cnn_prediction_str = " | ".join(cnn_preds) if cnn_preds else "n/a"
+
+        # 4. Confidence Percentage formatting
+        conf_list = confidence if isinstance(confidence, list) else ([confidence] if confidence is not None else [])
+        conf_formatted = []
+        for c in conf_list:
+            if isinstance(c, (int, float)):
+                val = c * 100 if c <= 1.0 else c
+                conf_formatted.append(f"{val:.1f}")
+            elif c is not None and str(c).strip():
+                conf_formatted.append(str(c))
+
+        numeric_confidence = " | ".join(conf_formatted) if conf_formatted else "n/a"
+        # 5. Horde distance calculation
         distance_to_horde = (
             ambulance_distance - zombie_distance
             if ambulance_distance is not None and zombie_distance is not None
             else None
         )
 
-        # 2. Format CNN prediction into a single clean string (e.g. "healthy (medic)")
-        cnn_class_str = CNN_CLASS_MAP.get(predicted_class, "") if predicted_class is not None else ""
-        cnn_role_str = CNN_ROLE_MAP.get(predicted_role, "") if predicted_role is not None else ""
-        
-        if cnn_class_str and cnn_role_str and cnn_role_str != "none":
-            cnn_prediction = f"{cnn_class_str} ({cnn_role_str})"
-        else:
-            cnn_prediction = cnn_class_str or "N/A"
-
-        # 3. Formatted pure numerical confidence percentage (e.g., 94.5)
-        numeric_confidence = None
-        if isinstance(confidence, (int, float)):
-            numeric_confidence = round(confidence * 100, 2) if confidence <= 1.0 else round(confidence, 2)
-
-        # 4. Humanoid ground truth summary
-        truth_summary = "None"
-        if humanoid is not None:
-            state = getattr(humanoid, "img_class", getattr(humanoid, "state", "Humanoid"))
-            role = getattr(humanoid, "role", "none")
-            truth_summary = f"{state} ({role})" if role and role != "none" else str(state)
-
-        # 5. Agreement check
+        # 6. Agreement check
         agreed_with_cnn = None
-        if predicted_class is not None:
+        if pred_classes and pred_classes[0] is not None:
             agreed_with_cnn = (
-                (action == "save" and predicted_class in [1, 2]) or 
-                (action == "squish" and predicted_class == 0)
+                (action.lower() == "save" and pred_classes[0] in [1, 2]) or
+                (action.lower() == "squish" and pred_classes[0] == 0)
             )
 
         # Streamlined log dictionary
-        self.logger.append(
-            {
-                "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "is_split": is_split_screen,
-                "people_in_view": people_in_view if people_in_view is not None else 1,
-                "blur": blur,
-                "cnn_prediction": cnn_prediction,
-                "confidence_pct": numeric_confidence,  # Clean number for Google Sheets calculations
-                "capacity": self.get_current_capacity(),
-                "humanoid_truth": truth_summary,
-                "zombie_dist": zombie_distance,
-                "horde_dist": distance_to_horde,
-                "agreed_with_cnn": agreed_with_cnn,
-                "action_taken": action,
-            }
-        )
+        entry_dict = {
+            "datetime": datetime.now().strftime("%m-%d %H:%M:%S"),
+            "image_blurred": bool(image_blurred),
+            "is_split": bool(is_split_screen or len(active_humanoids) > 1),
+            "people_in_view": people_names_str,
+            "cnn_prediction": cnn_prediction_str,
+            "confidence_pct": numeric_confidence,
+            "capacity": self.get_current_capacity(),
+            "dist_of horde": distance_to_horde,
+            "agreed_with_cnn": agreed_with_cnn,
+            "action_taken": action.lower(),
+        }
+        self.logger.append(entry_dict)
+
+        # Append directly to local log.csv
+        file_exists = os.path.exists("log.csv") and os.path.getsize("log.csv") > 0
+        df_row = pd.DataFrame([entry_dict])
+        df_row.to_csv("log.csv", mode="a", index=False, header=not file_exists)
 
     def save_log(
         self,
@@ -241,68 +303,27 @@ class ScoreKeeper:
 
         df = pd.DataFrame(logs_to_save)
         df_clean = df.fillna("")
-        data_rows = df_clean.values.tolist()
 
-        # 2. Build Session Header and Summary Rows
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        headers = df_clean.columns.tolist()
-
-        # Start Header Row (spans columns nicely)
-        session_start_row = [f"--- SESSION START: {timestamp} ---"] + [""] * (len(headers) - 1)
-
-        # Summary Metrics
-        saved = self.score.get("saved", 0)
-        cured = self.score.get("cured", 0)
-        injured = self.score.get("injured_saved", 0)
-        killed = self.score.get("killed", 0)
-
-        # Session End Row with stats
-        summary_text = (
-            f"--- SESSION END: {timestamp} | "
-            f"TOTAL SAVED: {saved} | CURED: {cured} | INJURED: {injured} | KILLED: {killed} ---"
-        )
-        session_end_row = [summary_text] + [""] * (len(headers) - 1)
-
-        # 3. Sync and STACK in Google Sheets
+        # 2. SYNC TO GOOGLE SHEETS
         if sync_gsheets:
             try:
                 gc = gspread.service_account(filename="credentials.json")
                 sh = gc.open(spreadsheet_name)
                 worksheet = sh.sheet1
 
-                # Check if worksheet is completely empty
                 existing_headers = worksheet.row_values(1)
-
-                rows_to_append = []
+                data_rows = df_clean.values.tolist() 
+                # rows_to_append = []
 
                 if not existing_headers:
-                    # Write main column headers if it's a blank sheet
-                    rows_to_append.append(headers)
-
-                # Assemble: Start Divider -> Data Rows -> Summary End Divider
-                rows_to_append.append(session_start_row)
-                rows_to_append.extend(data_rows)
-                rows_to_append.append(session_end_row)
-
-                # Append everything to Google Sheets
-                worksheet.append_rows(rows_to_append, value_input_option="USER_ENTERED")
-                print(
-                    f"Google Sheets synced! Added session log ({len(data_rows)} actions) "
-                    f"with start/end markers to '{spreadsheet_name}'."
-                )
-
-            except gspread.exceptions.SpreadsheetNotFound:
-                print(
-                    f"[Google Sheets Error] Could not find spreadsheet named '{spreadsheet_name}'. "
-                    "Make sure the sheet exists and is shared with your credentials.json client_email!"
-                )
-            except Exception as e:
-                err_str = str(e)
-                status_code = getattr(e, "status_code", None)
-                if "200" in err_str or status_code == 200:
-                    print(f"Google Sheets synced successfully! Added session log.")
+                    rows_to_append = [df_clean.columns.tolist()] + data_rows
                 else:
-                    print(f"[Google Sheets Error] Failed to sync logs: {e}")
+                    rows_to_append = data_rows
+
+                worksheet.append_rows(rows_to_append, value_input_option="USER_ENTERED")
+                print(f"Google Sheets synced! Added {len(data_rows)} rows to '{spreadsheet_name}'.")
+            except Exception as e:
+                print(f"[Google Sheets Sync Error]: {e}")
 
         # Clear buffers AFTER saving
         self.logger.clear()
@@ -651,3 +672,4 @@ class ScoreKeeper:
             Returns a copy — safe to mutate; the original mapping is not affected.
         """
         return list(MAP_ACTION_INT_TO_STR)
+    
