@@ -1,0 +1,2 @@
+timestamp,move_number,game_id,round,num_people_in_view,default_cnn_prediction,default_cnn_confidence,role_cnn_prediction,role_cnn_confidence,humanoid_state_truth,role_truth,horde_distance,action_taken,agreed_with_cnn
+2026-07-24T21:57:06.793927+00:00,1,game-123,1,3,save,0.91,save,0.87,injured,support,4,save,True

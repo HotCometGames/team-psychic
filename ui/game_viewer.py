@@ -1,10 +1,19 @@
 import math
 import tkinter as tk
+from collections.abc import Callable
 from os.path import join
 from typing import Any
 from PIL import ImageTk, Image
 
 from gameplay.constants import UI_COLORS
+
+# Emoji glyphs used as lightweight icons on the camp screen — no image assets
+# to manage, and Tk resolves them via the system emoji font automatically.
+_ICON_CAMP = "\U0001F3D5"  # camping tent
+_ICON_KILLED = "\U0001F480"  # skull
+_ICON_SAVED = "❤"  # heart
+_ICON_VALUE = "⭐"  # star
+_ICON_CONTINUE = "➡"  # arrow
 
 
 class GameViewer:
@@ -21,6 +30,7 @@ class GameViewer:
     photo: list[Any] | None  # ImageTk.PhotoImage | None
     current_paths: list[str] # Add an attribute to remember current paths
     on_image_selected: Any
+    _score_widgets: list[tk.Widget]
 
     def __init__(self, root: Any, w: int, h: int, data_fp: str, humanoid: Any) -> None:
         """Create the game viewer canvas and display the first humanoid.
@@ -46,8 +56,7 @@ class GameViewer:
         self.photo = None
         self.current_paths = []
         self.on_image_selected = None
-
-        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        self._score_widgets = []
         self.create_photo(join(data_fp, humanoid.fp))
 
         # Bind events for clicking and hover-outline indications
@@ -174,55 +183,150 @@ class GameViewer:
     def _on_canvas_leave(self, event: Any) -> None:
         """Cleans up outline tracking marks if the cursor exits the canvas."""
         self.canvas.delete("indicator")
-        
+
+    def clear_score_display(self) -> None:
+        """Destroy any camp-screen widgets left over from the previous round.
+
+        Call before starting a new round — ``display_score``'s labels and
+        button are real child widgets (not canvas items), so they persist
+        across ``create_photo`` calls unless explicitly destroyed.
+        """
+        for widget in self._score_widgets:
+            widget.destroy()
+        self._score_widgets = []
+
     def display_score(
-        self, score: dict[str, int | float], end_reason: str = ""
+        self,
+        score: dict[str, int | float],
+        end_reason: str = "",
+        round_num: int | None = None,
+        totals: "dict[str, int | float] | None" = None,
+        on_continue: "Callable[[], None] | None" = None,
     ) -> None:
-        """Render the final score over the canvas.
+        """Render the camp screen — round results — over the canvas.
 
         Args:
             score: Dict with ``"killed"`` and ``"saved"`` integer counts and
-                ``"saved_value"`` float (total value of saved humanoids),
-                as returned by :meth:`~gameplay.scorekeeper.ScoreKeeper.get_score`.
-            end_reason: Optional end-of-game reason string (e.g. ``"Time's Up"``
+                ``"saved_value"`` float (total value of saved humanoids) for
+                *this round only*, as returned by
+                :meth:`~gameplay.scorekeeper.ScoreKeeper.get_score`.
+            end_reason: Optional end-of-round reason string (e.g. ``"Time's Up"``
                 or ``"The City Is Empty"``). Displayed as a bold header if provided.
+            round_num: Optional round number to display (e.g. ``"ROUND 1 COMPLETE"``).
+                Omit for a generic ``"CAMP"`` header.
+            totals: Optional dict with the same shape as ``score`` but summed
+                across every round played so far. Omit to hide the career-totals
+                section (e.g. before round 1 has any history to show).
+            on_continue: Optional callback fired by a "Continue to Next Round"
+                button. Omit to render the score with no continue button (e.g.
+                a true game-over screen).
         """
+        self.clear_score_display()  # guard against stacking widgets on a stale screen
+
+        # A single outer Frame holds the whole screen — destroying it in
+        # clear_score_display() takes every child down with it, so nothing
+        # below needs to be tracked individually.
+        outer = tk.Frame(self.canvas, bg=UI_COLORS["panel"])
+        self._score_widgets.append(outer)
+        outer.pack(anchor=tk.NW, padx=28, pady=24, fill=tk.BOTH)
+
         if end_reason:
             tk.Label(
-                self.canvas,
+                outer,
                 text=end_reason,
-                font=("Arial", 20, "bold"),
+                font=("Arial", 15, "bold"),
                 bg=UI_COLORS["panel"],
                 fg=UI_COLORS["accent"],
-            ).pack(anchor=tk.NW)
+            ).pack(anchor=tk.W)
+
+        header_text = (
+            f"{_ICON_CAMP}  ROUND {round_num} COMPLETE"
+            if round_num is not None
+            else f"{_ICON_CAMP}  CAMP"
+        )
         tk.Label(
-            self.canvas,
-            text="FINAL SCORE",
-            font=("Arial", 30, "bold"),
+            outer,
+            text=header_text,
+            font=("Arial", 28, "bold"),
             bg=UI_COLORS["panel"],
             fg=UI_COLORS["fg"],
-        ).pack(anchor=tk.NW)
-        tk.Label(
-            self.canvas,
-            text="Killed {}".format(score["killed"]),
-            font=("Arial", 18),
+        ).pack(anchor=tk.W, pady=(6, 20))
+
+        cards_row = tk.Frame(outer, bg=UI_COLORS["panel"])
+        cards_row.pack(anchor=tk.W, fill=tk.X)
+
+        self._build_stat_card(cards_row, "THIS ROUND", score)
+        if totals is not None:
+            self._build_stat_card(cards_row, "CAREER TOTALS", totals, padx=(20, 0))
+
+        if on_continue is not None:
+            tk.Button(
+                outer,
+                text=f"Continue to Next Round  {_ICON_CONTINUE}",
+                font=("Arial", 15, "bold"),
+                bg=UI_COLORS["btn_save"],
+                fg="black",
+                activebackground="black",
+                activeforeground=UI_COLORS["fg"],
+                relief=tk.FLAT,
+                bd=0,
+                padx=18,
+                pady=10,
+                command=on_continue,
+            ).pack(anchor=tk.W, pady=(24, 0))
+
+    @staticmethod
+    def _build_stat_card(
+        parent: tk.Widget,
+        title: str,
+        stats: dict[str, int | float],
+        padx: int | tuple[int, int] = 0,
+    ) -> None:
+        """Build one bordered stat card (title + killed/saved/value rows).
+
+        Args:
+            parent: Frame the card is packed into.
+            title: Card heading, e.g. ``"THIS ROUND"`` or ``"CAREER TOTALS"``.
+            stats: Dict with ``"killed"``, ``"saved"``, ``"saved_value"`` keys.
+            padx: Horizontal padding passed to the card's own ``pack()`` call —
+                used to space multiple cards apart in the same row.
+        """
+        card = tk.Frame(
+            parent,
             bg=UI_COLORS["panel"],
-            fg=UI_COLORS["accent"],
-        ).pack(anchor=tk.NW)
+            highlightbackground=UI_COLORS["card_border"],
+            highlightthickness=1,
+        )
+        card.pack(side=tk.LEFT, anchor=tk.N, padx=padx)
+
+        inner = tk.Frame(card, bg=UI_COLORS["panel"], padx=16, pady=12)
+        inner.pack()
+
         tk.Label(
-            self.canvas,
-            text="Saved {}".format(score["saved"]),
-            font=("Arial", 18),
+            inner,
+            text=title,
+            font=("Arial", 13, "bold"),
             bg=UI_COLORS["panel"],
             fg=UI_COLORS["fg"],
-        ).pack(anchor=tk.NW)
-        tk.Label(
-            self.canvas,
-            text="Saved Value {0:.4f}".format(score["saved_value"]),
-            font=("Arial", 18),
-            bg=UI_COLORS["panel"],
-            fg=UI_COLORS["fg"],
-        ).pack(anchor=tk.NW)
+        ).pack(anchor=tk.W, pady=(0, 8))
+
+        rows = [
+            (_ICON_KILLED, "Killed {}".format(stats["killed"]), UI_COLORS["accent"]),
+            (_ICON_SAVED, "Saved {}".format(stats["saved"]), UI_COLORS["fg"]),
+            (
+                _ICON_VALUE,
+                "Value {0:.4f}".format(stats["saved_value"]),
+                UI_COLORS["fg"],
+            ),
+        ]
+        for icon, text, color in rows:
+            tk.Label(
+                inner,
+                text=f"{icon}  {text}",
+                font=("Arial", 15),
+                bg=UI_COLORS["panel"],
+                fg=color,
+            ).pack(anchor=tk.W, pady=2)
 
     @staticmethod
     def _get_photo(img_path: str, max_w: int, max_h: int) -> Any:

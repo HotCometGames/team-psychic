@@ -1,0 +1,2 @@
+timestamp,game_id,round,timestamp_start,total_saved,total_cured,total_injured,total_killed
+2026-07-24T21:57:06.794662+00:00,game-123,1,2026-07-24T00:00:00Z,2,1,0,1
