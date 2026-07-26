@@ -2,12 +2,28 @@ import json
 import os
 import uuid
 from typing import Any
-
+from datetime import datetime
 import pandas as pd
+
+import gspread
+from gspread_dataframe import set_with_dataframe
 
 from gameplay.constants import HEADCOUNT_WEIGHT, VALUE_WEIGHT
 from gameplay.enums import ActionCost, ActionState
 from gameplay.humanoid import Humanoid
+
+CNN_CLASS_MAP = {
+    0: "zombie",
+    1: "healthy",
+    2: "injured",
+    3: "corpse"
+}
+
+CNN_ROLE_MAP = {
+    0: "civilian",
+    1: "medic",
+    2: "engineer"
+}
 
 # Convenience mappings to make converting these throughout the code less error prone
 MAP_ACTION_STR_TO_INT: dict[str, int] = {s.value: i for i, s in enumerate(ActionState)}
@@ -66,6 +82,19 @@ class ScoreKeeper:
     remaining_time: int
     ambulance_value: float
     medics_saved: int
+
+    HEADERS = [
+        "datetime",
+        "blur",
+        "is_split",
+        "people_in_view",
+        "cnn_prediction",
+        "confidence_pct",
+        "capacity",
+        "dist_of horde",
+        "agreed_with_cnn",
+        "action_taken",
+    ]
 
     def __init__(
         self, shift_length: int, capacity: int, seed: int | None = None
@@ -135,161 +164,212 @@ class ScoreKeeper:
         humanoid: "Humanoid | None",
         action: str,
         predicted_class: int | None = None,
+        predicted_role: int | None = None,
         recommended_action: str | None = None,
-        confidence: str | None = None,
         obs: list[float] | None = None,
+        confidence: float | str | None = None,
         zombie_distance: float | None = None,
         ambulance_distance: float | None = None,
+        image_blurred: bool = False,
+        is_split_screen: bool = False,
+        people_in_view: int | None = None,
     ) -> None:
-        """Append an action entry to the current episode log.
+        """Append a streamlined, highly readable action entry to the current log."""
+        
+        if humanoid is None:
+            active_humanoids = []
+        elif isinstance(humanoid, list):
+            active_humanoids = [h for h in humanoid if h is not None]
+        else:
+            active_humanoids = [humanoid]
 
-        Call this *after* confirming the action was executed (not blocked) so
-        that no ghost rows are written for blocked actions. ``remaining_time``
-        and ``capacity`` reflect the pre-action state at call time.
+        # 2. Extract detailed types/roles for people in view
+        # 2. Extract ground-truth types/roles
+        people_names = []
+        for h in active_humanoids:
+            # Check helper methods first, fallback to state/img_class attributes
+            if getattr(h, "is_zombie", lambda: False)() or str(getattr(h, "state", getattr(h, "img_class", ""))).lower() in ["zombie", "0"]:
+                name_item = "zombie"
+            elif getattr(h, "is_corpse", lambda: False)() or str(getattr(h, "state", getattr(h, "img_class", ""))).lower() in ["corpse", "dead", "3"]:
+                name_item = "corpse"
+            elif getattr(h, "is_injured", lambda: False)() or str(getattr(h, "state", getattr(h, "img_class", ""))).lower() in ["injured", "2"]:
+                name_item = "injured"
+            else:
+                role_attr = getattr(h, "role", "civilian")
+                role_val = str(getattr(role_attr, "value", role_attr) or "").lower()
+                name_item = role_val if role_val not in ["none", "", "civilian"] else "civilian"
 
-        When ``humanoid`` is ``None`` (e.g. the auto-scram triggered by
-        ``get_score()`` at game end), humanoid fields are logged as ``None``.
-        These appear as ``NaN`` after a CSV round-trip via pandas.
+            people_names.append(name_item)
 
-        Args:
-            humanoid: The humanoid that was acted on, or ``None`` for synthetic
-                entries (e.g. the final auto-scram from ``get_score()``).
-            action: String name of the action taken (e.g. ``"save"``, ``"squish"``).
-            predicted_class: Integer class index predicted by the classifier, or
-                ``None`` if no classifier was used.
-            recommended_action: Action string suggested by the recommender, or
-                ``None`` if no recommender was used.
-            confidence: Classifier confidence bucket — ``"low"``, ``"mid"``, or
-                ``"high"`` — or ``None`` if no classifier was used.
-            obs: Raw 15-float RL observation vector (pre-action) as a Python
-                list, or ``None`` if not available (e.g. human UI modes).
-                Stored as a JSON array string in the log for RL debugging.
-            zombie_distance: Horde's position in feet at the moment this
-                decision was made (from ``HordeMeter``), or ``None`` if the
-                horde meter isn't in play (e.g. headless/auto mode).
-            ambulance_distance: Ambulance's position in feet at the moment
-                this decision was made, or ``None`` if not applicable.
-        """
+        people_names_str = " | ".join(people_names) if people_names else "none"
+
+        # 3. Standardize predictions into lists
+        pred_classes = predicted_class if isinstance(predicted_class, list) else ([predicted_class] if predicted_class is not None else [])
+        pred_roles = predicted_role if isinstance(predicted_role, list) else ([predicted_role] if predicted_role is not None else [])
+
+        cnn_preds = []
+        for idx in range(len(active_humanoids)):
+            p_cls = pred_classes[idx] if idx < len(pred_classes) else None
+            p_role = pred_roles[idx] if idx < len(pred_roles) else None
+
+            cls_str = CNN_CLASS_MAP.get(p_cls, "").lower() if p_cls is not None else ""
+            role_str = CNN_ROLE_MAP.get(p_role, "").lower() if p_role is not None else ""
+
+            if cls_str in ["healthy", "default", "humanoid"]:
+                cls_str = "civilian"
+
+            if "zombie" in cls_str:
+                cnn_preds.append("zombie")
+            elif cls_str == "civilian":
+                if role_str and role_str not in ["none", "civilian"]:
+                    cnn_preds.append(role_str)
+                else:
+                    cnn_preds.append("civilian")
+            elif cls_str:
+                if role_str and role_str not in ["none", "civilian"]:
+                    cnn_preds.append(f"{cls_str} ({role_str})")
+                else:
+                    cnn_preds.append(cls_str)
+
+        cnn_prediction_str = " | ".join(cnn_preds) if cnn_preds else "n/a"
+
+        # 4. Confidence Percentage formatting
+        conf_list = confidence if isinstance(confidence, list) else ([confidence] if confidence is not None else [])
+        conf_formatted = []
+        for c in conf_list:
+            if isinstance(c, (int, float)):
+                val = c * 100 if c <= 1.0 else c
+                conf_formatted.append(f"{val:.1f}")
+            elif c is not None and str(c).strip():
+                conf_formatted.append(str(c))
+
+        numeric_confidence = " | ".join(conf_formatted) if conf_formatted else "n/a"
+        # 5. Horde distance calculation
         distance_to_horde = (
             ambulance_distance - zombie_distance
             if ambulance_distance is not None and zombie_distance is not None
             else None
         )
-        self.logger.append(
-            {
-                # Raw metadata-CSV fields for this humanoid (class/injured/
-                # gender/item/role), not just the derived 4-way state — lets
-                # the log stand on its own without cross-referencing the
-                # original dataset CSV.
-                "humanoid_ground_truth": (
-                    humanoid.state if humanoid is not None else None
-                ),
-                "humanoid_class": humanoid.img_class if humanoid is not None else None,
-                "humanoid_injured": humanoid.injured if humanoid is not None else None,
-                "humanoid_gender": humanoid.gender if humanoid is not None else None,
-                "humanoid_item": humanoid.item if humanoid is not None else None,
-                "humanoid_role": humanoid.role if humanoid is not None else None,
-                "humanoid_predicted_class": predicted_class,
-                "recommended_action": recommended_action,
-                "confidence": confidence,
-                "humanoid_fp": humanoid.fp if humanoid is not None else None,
-                "action": action,
-                "remaining_time": self.remaining_time,
-                "humanoid_value": humanoid.value if humanoid is not None else None,
-                "capacity": self.get_current_capacity(),
-                "amb_zombie": self.ambulance["zombie"],
-                "amb_injured": self.ambulance["injured"],
-                "amb_healthy": self.ambulance["healthy"],
-                "amb_corpse": self.ambulance["corpse"],
-                # "Extra" ambulance-composition snapshot, pre-action (same
-                # timing as capacity/amb_* above) — total occupants plus the
-                # doctor/engineer headcounts used by the cure/(future) speed
-                # mechanics.
-                "amb_total": self.get_current_capacity(),
-                "amb_medics": self.ambulance_medics,
-                "amb_engineers": self.ambulance_engineers,
-                "obs_json": json.dumps(obs) if obs is not None else None,
-                "zombie_distance": zombie_distance,
-                "ambulance_distance": ambulance_distance,
-                "distance_to_horde": distance_to_horde,
-            }
-        )
 
-    def save_log(self, log_dir: str | None = None) -> None:
-        """Append per-turn and per-game logs to ``log.csv`` and ``summary.csv``.
+        # 6. Agreement check
+        agreed_with_cnn = None
+        if pred_classes and pred_classes[0] is not None:
+            agreed_with_cnn = (
+                (action.lower() == "save" and pred_classes[0] in [1, 2]) or
+                (action.lower() == "squish" and pred_classes[0] == 0)
+            )
 
-        Both files accumulate across runs — each call appends only new rows
-        (episodes not yet written) rather than re-writing the full history.
-        ``run_id`` (UUID4) identifies each episode and joins the two files:
-        ``df = log.merge(summary, on="run_id")``.
+        # Streamlined log dictionary
+        entry_dict = {
+            "datetime": datetime.now().strftime("%m-%d %H:%M:%S"),
+            "image_blurred": bool(image_blurred),
+            "is_split": bool(is_split_screen or len(active_humanoids) > 1),
+            "people_in_view": people_names_str,
+            "cnn_prediction": cnn_prediction_str,
+            "confidence_pct": numeric_confidence,
+            "capacity": self.get_current_capacity(),
+            "dist_of horde": distance_to_horde,
+            "agreed_with_cnn": agreed_with_cnn,
+            "action_taken": action.lower(),
+        }
+        self.logger.append(entry_dict)
 
-        Safe to call multiple times — a write cursor (``_all_logs_written``)
-        tracks which committed episodes have already been persisted, so
-        double-calls and periodic mid-training saves produce no duplicates.
+        # Append directly to local log.csv
+        file_exists = os.path.exists("log.csv") and os.path.getsize("log.csv") > 0
+        df_row = pd.DataFrame([entry_dict])
+        df_row.to_csv("log.csv", mode="a", index=False, header=not file_exists)
 
-        ``log.csv`` — one row per turn, keyed by ``run_id``.
-        ``summary.csv`` — one row per episode with final scores and reward.
+    def save_log(
+        self,
+        spreadsheet_name: str = "GameLogs",
+        sync_gsheets: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        """Save active logs directly to Google Sheets with session headers and summaries."""
+        # 1. Gather all logged turns
+        logs_to_save = []
+        for entry in self.all_logs:
+            if isinstance(entry, dict) and "log" in entry:
+                logs_to_save.extend(entry["log"])
+            elif isinstance(entry, dict):
+                logs_to_save.append(entry)
 
-        Args:
-            log_dir: Directory to write log files into. Defaults to the
-                current working directory if ``None``.
-        """
-        base = log_dir if log_dir is not None else "."
-        # Only write committed episodes that haven't been persisted yet.
-        new_episodes = self.all_logs[self._all_logs_written :]
-        self._all_logs_written = len(self.all_logs)
         if self.logger:
-            new_episodes = list(new_episodes) + [
-                {
-                    "run_id": self.current_run_id,
-                    "log": list(
-                        self.logger
-                    ),  # copy — mid-episode append would corrupt the snapshot
-                    "score": dict(self.score),
-                }
-            ]
-        episodes = new_episodes
-        if not episodes:
+            logs_to_save.extend(self.logger)
+
+        if not logs_to_save:
+            print("[Sheets Sync] No new log entries to save.")
             return
 
-        # log.csv — turn-by-turn (append; write header only on first write)
-        turn_dfs = []
-        for ep in episodes:
-            df = pd.DataFrame(ep["log"])
-            df["run_id"] = ep["run_id"]
-            turn_dfs.append(df)
-        log_path = os.path.join(base, "log.csv")
-        log_exists = os.path.exists(log_path)
-        pd.concat(turn_dfs).to_csv(
-            log_path, mode="a", index=False, header=not log_exists
-        )
+        df = pd.DataFrame(logs_to_save)
+        df_clean = df.fillna("")
 
-        # summary.csv — one row per game (append; write header only on first write)
-        summary_rows = []
-        for ep in episodes:
-            s = ep["score"]
-            reward = (
-                HEADCOUNT_WEIGHT * (s["saved"] - s["killed"])
-                + VALUE_WEIGHT * s["saved_value"]
-            )
-            summary_rows.append(
-                {
-                    "run_id": ep["run_id"],
-                    "shift_length": self.shift_length,
-                    "capacity": self.capacity,
-                    "num_turns": len(ep["log"]),
-                    "killed": s["killed"],
-                    "saved": s["saved"],
-                    "saved_value": round(s["saved_value"], 6),
-                    "reward": round(reward, 6),
-                    "seed": self.seed,
-                }
-            )
-        summary_path = os.path.join(base, "summary.csv")
-        summary_exists = os.path.exists(summary_path)
-        pd.DataFrame(summary_rows).to_csv(
-            summary_path, mode="a", index=False, header=not summary_exists
-        )
+        # 2. SYNC TO GOOGLE SHEETS
+        if sync_gsheets:
+            try:
+                gc = gspread.service_account(filename="credentials.json")
+                sh = gc.open(spreadsheet_name)
+                worksheet = sh.sheet1
+
+                existing_headers = worksheet.row_values(1)
+                data_rows = df_clean.values.tolist() 
+                # rows_to_append = []
+
+                if not existing_headers:
+                    rows_to_append = [df_clean.columns.tolist()] + data_rows
+                else:
+                    rows_to_append = data_rows
+
+                worksheet.append_rows(rows_to_append, value_input_option="USER_ENTERED")
+                print(f"Google Sheets synced! Added {len(data_rows)} rows to '{spreadsheet_name}'.")
+            except Exception as e:
+                print(f"[Google Sheets Sync Error]: {e}")
+
+        # Clear buffers AFTER saving
+        self.logger.clear()
+        self.all_logs.clear()
+        
+    def sync_to_google_sheets(
+        self, 
+        spreadsheet_name: str, 
+        credentials_path: str = "credentials.json",
+        log_path: str = "log.csv"
+    ) -> None:
+        """Appends formatted log data from log.csv to Google Sheets without overwriting."""
+        if not os.path.exists(log_path) or os.path.getsize(log_path) == 0:
+            print(f"Sync skipped: '{log_path}' is empty or missing.")
+            return
+
+        df = pd.read_csv(log_path)
+        if df.empty:
+            print("Sync skipped: 'log.csv' contains no data rows.")
+            return
+
+        try:
+            gc = gspread.service_account(filename=credentials_path)
+            sh = gc.open(spreadsheet_name)
+            worksheet = sh.get_worksheet(0)
+
+            # Convert Dataframe to clean list of rows, converting NaN to empty strings
+            df_clean = df.fillna("")
+            data_rows = df_clean.values.tolist()
+
+            # Check if headers exist on row 1
+            existing_headers = worksheet.row_values(1)
+
+            if not existing_headers:
+                # Sheet is empty: add headers + data
+                headers = df_clean.columns.tolist()
+                rows_to_append = [headers] + data_rows
+            else:
+                # Sheet already has headers: append ONLY new data rows
+                rows_to_append = data_rows
+
+            worksheet.append_rows(rows_to_append, value_input_option="USER_ENTERED")
+            print(f"Successfully stacked {len(data_rows)} new rows to Google Sheets!")
+
+        except Exception as e:
+            print(f"[Google Sheets Error] Failed to sync logs: {e}")
 
     def save(self, humanoid: Humanoid) -> None:
         """Load a humanoid onto the ambulance.
@@ -592,3 +672,4 @@ class ScoreKeeper:
             Returns a copy — safe to mutate; the original mapping is not affected.
         """
         return list(MAP_ACTION_INT_TO_STR)
+    
