@@ -86,16 +86,20 @@ IMAGE_BLUR_RADIUS: float = 10.0
 
 # UI color palette — adjust these to restyle the interface.
 UI_COLORS: dict[str, str] = {
-    "bg": "#1a1a1a",  # root and canvas background
-    "panel": "#242424",  # widget panel backgrounds (slightly lighter)
-    "fg": "#f0f0f0",  # default text
-    "btn_skip": "#2e4057",  # muted blue — neutral action
-    "btn_squish": "#7b2d2d",  # dark red — destructive action
-    "btn_save": "#1e4d35",  # dark green — positive action
-    "btn_scram": "#6b4c11",  # amber — urgency / retreat
-    "btn_default": "#333333",  # machine mode / fallback buttons
-    "btn_active": "#4a4a4a",  # hover / active state
-    "meter_filled": "#e63946",  # ambulance slot filled (danger red)
-    "accent": "#e63946",  # highlights and end-screen text
-    "card_border": "#3a3a3a",  # camp-screen stat card outline
+    "bg": "#1a1a1a",             # Root canvas background
+    "panel": "#242424",          # Panel enclosure background
+    "fg": "#ecf4e4",             # Default text color
+    "accent": "#55ff55",         # Phosphor green highlight
+    "card_border": "#445544",    # Heavy stamped-steel border color
+    "slot_border": "#335533",    # Inset slot border color
+    "slot_bg": "#111811",        # Dark cargo bay slot background
+    
+    # Action button face colors (industrial palette)
+    "btn_skip": "#363e25",       # Slate Blue
+    "btn_squish": "#3e3525",     # Hazard Warning Red
+    "btn_save": "#3e3525",       # Armored Recovery Green
+    "btn_scram": "#3b331a",      # Caution Amber
+    "btn_default": "#2a2a2a",    # Fallback button background
+    "btn_active": "#29b729",     # Hover/Active state
+    "meter_filled": "#1e4d35",   # Slot filled color
 }

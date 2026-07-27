@@ -1,5 +1,7 @@
 import math
 import tkinter as tk
+import os
+from PIL import Image, ImageTk
 from typing import Any
 
 from gameplay.constants import UI_COLORS
@@ -19,15 +21,15 @@ class CapacityMeter:
     canvas: tk.Canvas
     unit_size: int
     _units: list[int]
-    CATEGORY_COLORS = {
-        "medic": "#56E9F9",          # Cyan (Healthy Specialist)
-        "engineer": "#64EAF9",       # Cyan (Healthy Specialist)
-        "injured_medic": "#1E90FF",   # Deep Blue (Injured Specialist)
-        "injured_engineer": "#1E90FF",# Deep Blue (Injured Specialist)
-        "civilian": "#46DF46",       # Green (Healthy Civilian)
-        "injured": "#FFA500",        # Orange (Injured Civilian)
-        "zombie": "#D13C3C",         # Red (Threat)
-        "corpse": "#CB3D3D",         # Dark Red (Corpse)
+    CATEGORY_IMAGES = {
+        "medic": "ui/graphics/icons/doctor.png",
+        "engineer": "ui/graphics/icons/engineer.png",
+        "injured_medic": "ui/graphics/icons/injured.png",
+        "injured_engineer": "ui/graphics/icons/injured.png",
+        "civilian": "ui/graphics/icons/civilian.png",
+        "injured": "ui/graphics/icons/injured.png",
+        "zombie": "ui/graphics/icons/zombie.png",
+        "corpse": "ui/graphics/icons/zombie.png",
     }
 
     CATEGORY_PRIORITY = {
@@ -50,19 +52,35 @@ class CapacityMeter:
             h: Window height in pixels (used to position the canvas).
             max_cap: Total number of ambulance slots to display.
         """
-        self._canvas_w = math.floor(0.2 * w)
         self.canvas = tk.Canvas(
             root,
-            width=self._canvas_w,
-            height=math.floor(0.45 * h),
+            width=250,
+            height=280,
             bg=UI_COLORS["panel"],
-            highlightthickness=0,
+            highlightbackground=UI_COLORS["card_border"],
+            highlightthickness=3,
+            relief=tk.GROOVE,
+            bd=3,
         )
-        self.canvas.place(x=math.floor(0.75 * w), y=math.floor(0.4 * h))
+        self.canvas.place(x=math.floor(0.76 * w), y=350)
+        
         self._units = []
-        self.unit_size = 40
+        self.unit_size = 42  # Slightly larger slots to fill the expanded box
+        self._unit_icons = []
+
+        self.icon_cache: dict[str, ImageTk.PhotoImage] = {}
+        self._load_icons(self.unit_size)
+
         self.canvas.update()
         self.render(max_cap, self.unit_size)
+
+    def _load_icons(self, size: int) -> None:
+        """Load and resize icon images to fit the capacity unit square."""
+        for category, path in self.CATEGORY_IMAGES.items():
+            if os.path.exists(path):
+                with Image.open(path) as img:
+                    resized = img.resize((size, size), Image.LANCZOS)
+                    self.icon_cache[category] = ImageTk.PhotoImage(resized)
 
     def render(self, max_cap: int, size: int) -> None:
         """Draw the capacity label and all unit squares on the canvas.
@@ -73,38 +91,56 @@ class CapacityMeter:
         """
         tk.Label(
             self.canvas,
-            text="Capacity",
-            font=("Arial", 15),
+            text="[ CAPACITY ]",
+            font=("Courier New", 11, "bold"),
             bg=UI_COLORS["panel"],
             fg=UI_COLORS["fg"],
-        ).place(x=100, y=0)
+        ).pack(side=tk.TOP, pady=(15, 15))
 
-        x = 3
-        y = 50
-        for _ in range(max_cap):
-            self._units.append(self.create_unit(self.canvas, x, y, size))
-            x += size * 3 // 2
-            if (x + size * 3 // 2) > self._canvas_w:
-                x = 3
-                y += size * 3 // 2
+        grid_frame = tk.Frame(self.canvas, bg=UI_COLORS["panel"])
+        grid_frame.pack(side=tk.TOP, padx=15, pady=5)
+
+        cols = 4
+        for i in range(max_cap):
+            row = i // cols
+            col = i % cols
+            
+            # Canvas slot with matching mechy border color instead of white/default outline
+            slot_canvas = tk.Canvas(
+                grid_frame,
+                width=size,
+                height=size,
+                bg=UI_COLORS["slot_bg"],
+                highlightbackground=UI_COLORS["slot_border"],
+                highlightcolor=UI_COLORS["slot_border"],
+                highlightthickness=2,
+                relief=tk.SUNKEN,
+                bd=1,
+            )
+            slot_canvas.grid(row=row, column=col, padx=5, pady=5)
+
+            img_id = slot_canvas.create_image(
+                size // 2, size // 2, anchor=tk.CENTER, image=""
+            )
+            
+            self._units.append(slot_canvas)
+            self._unit_icons.append((slot_canvas, img_id))
 
     def update_fill(self, saved_passengers: Any) -> None:
         """Update the filled/empty state of the capacity squares."""
         # 1. Reset all canvas squares to empty background
-        for unit in self._units:
-            self.canvas.itemconfig(unit, fill=UI_COLORS["panel"], outline="#555555")
+        for slot_canvas, img_id in self._unit_icons:
+            slot_canvas.config(bg=UI_COLORS["slot_bg"])
+            slot_canvas.itemconfig(img_id, image="")
 
         # Handle integer inputs (e.g. update_fill(0))
         if isinstance(saved_passengers, int):
             for i in range(min(saved_passengers, len(self._units))):
-                self.canvas.itemconfig(
-                    self._units[i],
-                    fill=UI_COLORS["meter_filled"],
-                    outline=UI_COLORS["meter_filled"],
-                )
+                slot_canvas, _ = self._unit_icons[i]
+                slot_canvas.config(bg=UI_COLORS["meter_filled"])
             return
 
-        # If passed ScoreKeeper.ambulance dictionary, expand it into a list of strings
+        # If passed ScoreKeeper.ambulance dictionary, expand it into a list
         if isinstance(saved_passengers, dict):
             expanded = []
             for category, count in saved_passengers.items():
@@ -147,13 +183,13 @@ class CapacityMeter:
                 break  # Prevent capacity overflow
 
             key = get_key(humanoid)
-            color = self.CATEGORY_COLORS.get(key, UI_COLORS["meter_filled"])
+            slot_canvas, img_id = self._unit_icons[i]
+            slot_canvas.config(bg=UI_COLORS["meter_filled"])
+            
+            if key in self.icon_cache:
+                slot_canvas.itemconfig(img_id, image=self.icon_cache[key])
+            
 
-            self.canvas.itemconfig(
-                self._units[i],
-                fill=color,
-                outline=color,
-            )
     @staticmethod
     def create_unit(canvas: tk.Canvas, x: float, y: float, size: int) -> int:
         """Draw a single capacity square on the canvas and return its item ID.
@@ -167,6 +203,10 @@ class CapacityMeter:
         Returns:
             Tkinter canvas item ID for the created rectangle.
         """
-        return canvas.create_rectangle(
+        rect_id = canvas.create_rectangle(
             x, y, x + size, y + size, fill=UI_COLORS["panel"], outline="#555555"
         )
+        img_id = canvas.create_image(
+            x + size // 2, y + size // 2, anchor=tk.CENTER, image=""
+        )
+        return rect_id, img_id

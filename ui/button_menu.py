@@ -1,4 +1,5 @@
 import tkinter as tk
+from tkinter import ttk
 from collections.abc import Callable
 
 from gameplay.constants import UI_COLORS
@@ -43,17 +44,31 @@ class ButtonMenu:
         # height=80 is sized for up to 4 buttons (each ~20px). Adding more buttons
         # without increasing this value causes them to overflow below the canvas
         # boundary and overlap with widgets placed below y=150+80=230.
+        self.style = ttk.Style()
+        self.style.theme_use("clam")
+
         self.canvas = tk.Canvas(
             root,
-            width=500,
-            height=180,
-            bg=UI_COLORS["bg"],
-            highlightthickness=0,
+            width=320,
+            height=450,
+            bg=UI_COLORS["panel"],
+            highlightbackground=UI_COLORS["card_border"],
+            highlightthickness=3,
+            relief=tk.GROOVE,
+            bd=3,
         )
-        self.canvas.place(x=100, y=150)
-        self.buttons = self._create_buttons(self.canvas, items)
-        self._create_menu(self.canvas, self.buttons)
+        self.canvas.place(x=60, y=120)
 
+        tk.Label(
+            self.canvas,
+            text="[ SYSTEM CONTROLS ]",
+            font=("Courier New", 10, "bold"),
+            bg=UI_COLORS["panel"],
+            fg=UI_COLORS["fg"],
+        ).pack(side=tk.TOP, pady=(10, 5))
+
+        self.buttons = self._create_buttons(self.canvas, items, self.style)
+        self._create_menu(self.canvas, self.buttons)
     def set_text(self, base_name: str, text: str) -> None:
         """Update one button's display text in place.
 
@@ -114,6 +129,7 @@ class ButtonMenu:
     def _create_buttons(
         canvas: tk.Canvas,
         items: list[tuple[str, Callable[[], None]]],
+        style: ttk.Style,
     ) -> dict[str, tk.Button]:
         """Create and return a dict of styled Tkinter buttons.
 
@@ -127,21 +143,33 @@ class ButtonMenu:
         """
         buttons: dict[str, tk.Button] = {}
         for text, action in items:
-            base = text.split(" [")[0]  # strip cost suffix to get action name
+            base = text.split(" [")[0]
             bg = _BTN_COLORS.get(base, UI_COLORS["btn_default"])
-            buttons[base] = tk.Button(
+            style_name = f"Mech.{base}.TButton"
+
+            # Configure custom TTK style for each action type
+            style.configure(
+                style_name,
+                font=("Courier New", 11, "bold"),
+                background=bg,
+                foreground="#e5ebde",
+                borderwidth=4,
+                relief="raised",
+                padding=(12, 16),
+            )
+            style.map(
+                style_name,
+                background=[("active", UI_COLORS["btn_active"]), ("disabled", "#1a1a1a")],
+                foreground=[("disabled", "#444444")],
+            )
+
+            buttons[base] = ttk.Button(
                 canvas,
                 text=text,
-                height=2,
-                width=15,
+                style=style_name,
                 command=action,
-                bg=bg,
-                fg="black",
-                activebackground="black",
-                activeforeground=UI_COLORS["fg"],
-                disabledforeground="#555555",
-                relief=tk.FLAT,
-                bd=1,
+                cursor="hand2",
+                width=18,
             )
         return buttons
 
@@ -154,4 +182,4 @@ class ButtonMenu:
             buttons: Dict of buttons to pack, in the order they should appear.
         """
         for button in buttons.values():
-            button.pack(side=tk.TOP, pady=10)
+            button.pack(side=tk.TOP, pady=12, padx=15)

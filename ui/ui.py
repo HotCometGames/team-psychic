@@ -60,7 +60,7 @@ from gameplay.constants import (
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
 )
-from gameplay.enums import HordeDistance
+from gameplay.enums import ActionState, HordeDistance, State
 from gameplay.humanoid import Humanoid
 from gameplay.scorekeeper import ScoreKeeper
 from models.ActionRecommender import ActionRecommender
@@ -182,6 +182,33 @@ class UI:
         self.root.geometry(f"{w}x{h}")
         self.root.resizable(False, False)
         self.root.configure(bg=UI_COLORS["bg"])
+
+        bg_path = join(dirname(abspath(__file__)), "graphics", "background.png")
+        bg_raw = Image.open(bg_path)
+        self.bg_image = ImageTk.PhotoImage(bg_raw.resize((w, h), Image.LANCZOS))
+
+        self.bg_canvas = tk.Canvas(self.root, width=w, height=h, highlightthickness=0)
+        self.bg_canvas.pack(fill="both", expand=True)
+
+        # 2. Bottom Layer: Background Image
+        try:
+            bg_path = join(dirname(abspath(__file__)), "graphics", "background.png")
+            bg_raw = Image.open(bg_path)
+            self.bg_image = ImageTk.PhotoImage(bg_raw.resize((w, h), Image.LANCZOS))
+            self.bg_canvas.create_image(0, 0, image=self.bg_image, anchor="nw")
+        except FileNotFoundError:
+            print("backgroundGame.jpg not found in ui/graphics/")
+
+        # 3. Top Layer Pre-load: Frame Image
+        try:
+            frame_path = join(dirname(abspath(__file__)), "graphics", "frame.png")
+            # Resize frame to surround your photo (adjust 450x450 to match photo size)
+            frame_raw = Image.open(frame_path).convert("RGBA")
+            self.frame_photo = ImageTk.PhotoImage(frame_raw.resize((450, 450), Image.LANCZOS))
+        except FileNotFoundError:
+            self.frame_photo = None
+            print("frame.png not found in ui/graphics/")
+
         self._game_label = None
         self._bwsi_label = None
         self._create_header(w)
@@ -320,7 +347,6 @@ class UI:
                         )
                         scorekeeper.save(selected_humanoid)
                         self.saved_passengers.append(selected_humanoid)
-                        self._apply_engineer_bonus(selected_humanoid)
 
                         # Log any unchosen image(s) as skipped
                         for idx, h in enumerate(self.humanoids):
@@ -332,6 +358,9 @@ class UI:
                             ambulance_delta=HordeDistance.SAVE.value
                             + self.engineer_bonus_ft,
                         )
+                        # Applied after this turn's advance — the bonus starts
+                        # with the next action, not this Save.
+                        self._apply_engineer_bonus(selected_humanoid)
 
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
                         self.game_viewer.on_image_selected = None
@@ -349,11 +378,13 @@ class UI:
                     )
                     scorekeeper.save(self.humanoid)
                     self.saved_passengers.append(self.humanoid)
-                    self._apply_engineer_bonus(self.humanoid)
                     self.horde_meter.advance(
                         zombie_delta=HordeDistance.ZOMBIE.value,
                         ambulance_delta=HordeDistance.SAVE.value + self.engineer_bonus_ft,
                     )
+                    # Applied after this turn's advance — the bonus starts
+                    # with the next action, not this Save.
+                    self._apply_engineer_bonus(self.humanoid)
                     self.update_ui(scorekeeper)
                     self.get_next(data_fp, data_parser, scorekeeper)
 
@@ -381,9 +412,13 @@ class UI:
         # --- Horde distance meter — replaces the shift clock as the round's
         # --- end condition (see get_next() and _start_next_round()).
         self.horde_meter = HordeMeter(
-            self.root, w, h,
+           self.root,
+            w,
+            h,
             max_distance=HORDE_MAX_DISTANCE,
             initial_distance=HORDE_INITIAL_DISTANCE,
+            zombie_icon_path="ui/graphics/zombie.png",
+            ambulance_icon_path="ui/graphics/ambulance.png",
         )
 
         # --- Value display ---
@@ -399,22 +434,57 @@ class UI:
         # --- Machine output display (classifier label + recommender label) ---
         self._info_label = None
         if classifier is not None or recommender is not None:
-            self._info_label = tk.Label(
+            panel_x = math.floor(0.75 * w)  # Same X alignment as Capacity box
+            panel_w = math.floor(0.22 * w)  # Same width as Capacity box
+            panel_h = math.floor(0.24 * h)  # Compact height to avoid covering Capacity
+
+            self._info_container = tk.Frame(
                 self.root,
+                bg="#051405",                   # Dark terminal background
+                highlightbackground="#33ff33", # Phosphor green border
+                highlightthickness=2,
+                padx=14,
+                pady=12,
+            )
+            self._info_container.place(
+                x=panel_x,
+                y=math.floor(0.10 * h),      # Starts top-right
+                width=panel_w,
+                height=panel_h,
+            )
+
+            # Retro CRT Scanner Header
+            scanner_box = tk.Frame(
+                self._info_container,
+                bg="#051405",
+                highlightbackground="#33ff33",
+                highlightthickness=1,
+                padx=6,
+                pady=4,
+            )
+            scanner_box.pack(fill=tk.X, pady=(0, 10))
+
+            tk.Label(
+                scanner_box,
+                text="▶ AI SCANNER ACTIVE",
+                font=("Courier New", 11, "bold"),
+                fg="#55ff55",
+                bg="#051405",
+            ).pack(anchor=tk.CENTER)
+
+            # self._info_label
+            self._info_label = tk.Label(
+                self._info_container,
                 text="",
-                font=("Arial", 14),
+                font=("Courier New", 14, "bold"),
+                fg="#55ff55",
+                bg="#051405",
                 justify=tk.LEFT,
-                anchor="w",
-                bg=UI_COLORS["bg"],
-                fg=UI_COLORS["fg"],
+                anchor="nw",
+                wraplength=panel_w - 28,
             )
-            self._info_label.place(
-                x=math.floor(0.75 * w),
-                y=math.floor(0.1 * h),
-                width=math.floor(0.5 * w),
-                height=math.floor(0.125 * h),
-            )
-            # Show initial classification/recommendation for the first humanoid
+            self._info_label.pack(fill=tk.BOTH, expand=True)
+
             self._update_info_display(scorekeeper)
 
         def _on_close() -> None:
@@ -508,18 +578,42 @@ class UI:
     def _apply_engineer_bonus(self, humanoid: Humanoid) -> None:
         """Bump the ambulance's permanent speed bonus if ``humanoid`` is a live engineer.
 
-        Takes effect starting with the very ``horde_meter.advance()`` call for
-        this same Save action (call this before that), and every action for
-        the rest of the round after. Stacks additively — each engineer saved
-        adds another ``ENGINEER_SPEED_BONUS`` ft on top of the running total.
-        Only counts a *living* engineer (injured or healthy), matching the
-        same alive-subset rule ``ScoreKeeper`` uses for ``ambulance_engineers``.
+        Call this AFTER this turn's ``horde_meter.advance()``, so the bonus
+        takes effect starting with the *next* action, not the Save action
+        that brought the engineer aboard. Stacks additively — each engineer
+        saved adds another ``ENGINEER_SPEED_BONUS`` ft on top of the running
+        total. Only counts a *living* engineer (injured or healthy), matching
+        the same alive-subset rule ``ScoreKeeper`` uses for ``ambulance_engineers``.
 
         Args:
             humanoid: The humanoid just passed to ``scorekeeper.save()``.
         """
         if humanoid.is_engineer() and (humanoid.is_injured() or humanoid.is_healthy()):
             self.engineer_bonus_ft += ENGINEER_SPEED_BONUS
+
+    @staticmethod
+    def _scram_fallback(probs: "np.ndarray | None") -> ActionState:
+        """Substitute an actionable equivalent for a SCRAM recommendation.
+
+        Human play only has Skip/Squish/Save buttons — there is no way to
+        act on "scram", so it must never reach the on-screen suggestion or
+        the log. Falls back to the same classifier-driven rule
+        ``HeuristicRecommender`` uses for its non-capacity branch: squish for
+        a predicted zombie/corpse, skip otherwise (can't save — scram only
+        ever comes from an at-capacity or time-exhausted state).
+
+        Args:
+            probs: Classifier probability vector, or ``None`` if no
+                classifier is set (falls back to skip).
+
+        Returns:
+            ``ActionState.SQUISH`` or ``ActionState.SKIP`` — never SCRAM.
+        """
+        if probs is not None:
+            predicted_state = list(State)[int(np.argmax(probs))]
+            if predicted_state in (State.ZOMBIE, State.CORPSE):
+                return ActionState.SQUISH
+        return ActionState.SKIP
 
     def _should_blur_images(self) -> bool:
         """Return True when humanoid images should be blurred for the current round.
@@ -556,6 +650,7 @@ class UI:
             decision was made, before this turn's ``horde_meter.advance()``
             call moves them.
         """
+
         humanoids_to_log = target_humanoids if target_humanoids is not None else getattr(self, "humanoids", [self.humanoid])
         humanoids_to_log = [item for item in humanoids_to_log if item is not None]
 
@@ -578,6 +673,7 @@ class UI:
                         predicted_roles.append(None)
 
         is_split_screen = len(humanoids_to_log) > 1
+
 
         return {
             "predicted_class": predicted_classes,
@@ -636,6 +732,7 @@ class UI:
             return
         lines = []
         self._last_probs = []
+        
         for idx, h in enumerate(self.humanoids):
             prefix = f"Img {idx + 1}: " if len(self.humanoids) > 1 else ""
             probs = None
@@ -646,26 +743,26 @@ class UI:
                 
                 if self._show_classifier_label:
                     label, confidence = probs_to_class(probs)
-                    lines.append(f"{prefix} Classified as: {label.value} ({confidence:.0%})")
+                    lines.append(f"{prefix}Classified as: {label.value} ({confidence:.0%})")
                     if label.value == "healthy" and hasattr(self.classifier, "classify_role"):
                         role_probs = self.classifier.classify_role(h, state_probs=probs)
                         if role_probs is not None:
                             role_names = ("civilian", "medic", "engineer")
                             role_idx = int(np.argmax(role_probs))
                             lines.append(
-                                f"{prefix} Role: {role_names[role_idx]} "
+                                f"{prefix}Role: {role_names[role_idx]} "
                                 f"({float(role_probs[role_idx]):.0%})"
                             )
             
             if self.recommender is not None and probs is not None:
                 action = self.recommender.recommend(h, probs, scorekeeper)
+                if action == ActionState.SCRAM:
+                    action = self._scram_fallback(probs)
                 self._last_recommended_action = action.value  # cache for _get_log_context
                 lines.append(f"Suggested: {action.value}")
-        # probs/recommendation are still computed and cached above regardless
-        # (needed for _get_log_context's per-turn logging either way) — only
-        # the on-screen text is held back until AI display is actually active.
-        self._info_label.config(text="\n".join(lines) if self._ai_display_active() else "")
 
+        self._info_label.config(text="\n\n".join(lines) if self._ai_display_active() else "")
+        
     def get_next(
         self,
         data_fp: str,

@@ -1,7 +1,7 @@
 import math
 import tkinter as tk
 from collections.abc import Callable
-from os.path import join
+from os.path import abspath, dirname, join
 from typing import Any
 from PIL import ImageTk, Image, ImageFilter
 
@@ -66,6 +66,17 @@ class GameViewer:
         self.canvas.place(x=300, y=100)
         self.canvas.update()
 
+        try:
+            canvas_w = self.canvas.winfo_width()
+            canvas_h = self.canvas.winfo_height()
+            frame_path = join(dirname(abspath(__file__)), "graphics", "frame.png")
+            frame_raw = Image.open(frame_path).convert("RGBA")
+            # Resize frame to fill the canvas bounds exactly
+            self.frame_photo = ImageTk.PhotoImage(frame_raw.resize((canvas_w, canvas_h), Image.LANCZOS))
+        except FileNotFoundError:
+            self.frame_photo = None
+            print("frame.png not found in ui/graphics/")
+
         self.photo = None
         self.current_paths = []
         self.on_image_selected = None
@@ -88,6 +99,8 @@ class GameViewer:
         self.canvas.delete("photo")
         self.photos = []
 
+   
+    
     def create_photos(self, file_paths: list[str], blur: bool = False) -> None:
         """Load a list of images from disk and display them side-by-side.
 
@@ -103,6 +116,7 @@ class GameViewer:
         """
         self.canvas.delete("photo")
         self.canvas.delete("indicator")
+        self.canvas.delete("frame")
 
         # Re-arm mouse listeners for new choices
         self.canvas.bind("<Motion>", self._on_canvas_hover)
@@ -120,26 +134,31 @@ class GameViewer:
         canvas_h = self.canvas.winfo_height()
         target_w = math.floor(canvas_w / num_images)
 
-        target_w = math.floor(canvas_w / num_images)
 
         blur_radius = IMAGE_BLUR_RADIUS if blur else 0.0
         for i, fp in enumerate(file_paths):
-            # Calculate the horizontal offset for each image
-            x_offset = i * target_w
-
-            # Load and resize image to fit its fractional slice
+            
             photo = self._get_photo(fp, target_w, canvas_h, blur_radius=blur_radius)
             self.photos.append(photo)
 
-            img_h = photo.height()
-            y_offset = max(0, math.floor((canvas_h - img_h) / 2))
+            # Center the photo within its slice (X) and canvas height (Y)
+            x_center = i * target_w + (target_w // 2)
+            y_center = canvas_h // 2
 
-            # Place onto the canvas canvas
+            # Place onto the canvas
             self.canvas.create_image(
-                x_offset, y_offset,
-                anchor=tk.NW,
+                x_center, y_center,
+                anchor=tk.CENTER,  # Changed from NW to CENTER
                 image=photo,
                 tags=("photo", f"idx_{i}")
+            )
+
+        if hasattr(self, "frame_photo") and self.frame_photo:
+            self.canvas.create_image(
+                canvas_w // 2, canvas_h // 2,
+                image=self.frame_photo,
+                anchor=tk.CENTER,
+                tags="frame"
             )
 
     def create_photo(self, fp: str, blur: bool = False) -> None:
@@ -265,19 +284,23 @@ class GameViewer:
         # Placed directly on root (not self.canvas) and sized to nearly fill
         # the whole window — this is a full takeover screen, not just a
         # panel inside the humanoid-photo canvas.
-        margin = 20
+        panel_w = 700
+        panel_h = 580
+        panel_x = (self._w - panel_w) // 2
+        panel_y = (self._h - panel_h) // 2
+
         outer = tk.Frame(
             self._root,
             bg=UI_COLORS["panel"],
             highlightbackground=UI_COLORS["card_border"],
-            highlightthickness=1,
+            highlightthickness=3,
         )
         self._score_widgets.append(outer)
         outer.place(
-            x=margin,
-            y=margin,
-            width=self._w - 2 * margin,
-            height=self._h - 2 * margin,
+            x=panel_x,
+            y=panel_y,
+            width=panel_w,
+            height=panel_h,
         )
         outer.lift()
 
@@ -285,10 +308,10 @@ class GameViewer:
             tk.Label(
                 outer,
                 text=end_reason,
-                font=("Arial", 15, "bold"),
+                font=("Arial", 42, "bold"),
                 bg=UI_COLORS["panel"],
                 fg=UI_COLORS["accent"],
-            ).pack(anchor=tk.W)
+            ).pack(anchor=tk.CENTER, pady=(20, 5))
 
         header_text = (
             f"{_ICON_CAMP}  ROUND {round_num} COMPLETE"
@@ -301,10 +324,10 @@ class GameViewer:
             font=("Arial", 28, "bold"),
             bg=UI_COLORS["panel"],
             fg=UI_COLORS["fg"],
-        ).pack(anchor=tk.W, pady=(6, 20))
+        ).pack(anchor=tk.CENTER, pady=(0, 20))
 
         cards_row = tk.Frame(outer, bg=UI_COLORS["panel"])
-        cards_row.pack(anchor=tk.W, fill=tk.X)
+        cards_row.pack(anchor=tk.CENTER, pady=10)
 
         if round1_score is not None:
             self._build_stat_card(cards_row, "ROUND 1", round1_score)
@@ -333,7 +356,7 @@ class GameViewer:
                 padx=18,
                 pady=10,
                 command=on_continue,
-            ).pack(anchor=tk.W, pady=(24, 0))
+            ).pack(anchor=tk.CENTER, pady=(24, 0))
         else:
             # No on_continue means no rounds remain (MAX_ROUNDS reached) —
             # say so explicitly rather than leaving the screen looking stuck,
@@ -344,7 +367,7 @@ class GameViewer:
                 font=("Arial", 15, "bold"),
                 bg=UI_COLORS["panel"],
                 fg=UI_COLORS["accent"],
-            ).pack(anchor=tk.W, pady=(24, 0))
+            ).pack(anchor=tk.CENTER, pady=(24, 0))
             if on_restart is not None:
                 tk.Button(
                     outer,
@@ -359,7 +382,7 @@ class GameViewer:
                     padx=18,
                     pady=10,
                     command=on_restart,
-                ).pack(anchor=tk.W, pady=(10, 0))
+                ).pack(anchor=tk.CENTER, pady=(10, 0))
 
     def display_rules(self, on_start: "Callable[[], None]") -> None:
         """Render the one-time rules screen shown when the game first launches.
@@ -604,7 +627,7 @@ class GameViewer:
         card.pack(side=tk.LEFT, anchor=tk.N, padx=padx)
 
         inner = tk.Frame(card, bg=UI_COLORS["panel"], padx=16, pady=12)
-        inner.pack()
+        inner.pack(anchor=tk.CENTER)
 
         tk.Label(
             inner,
@@ -612,7 +635,7 @@ class GameViewer:
             font=("Arial", 13, "bold"),
             bg=UI_COLORS["panel"],
             fg=UI_COLORS["fg"],
-        ).pack(anchor=tk.W, pady=(0, 8))
+        ).pack(anchor=tk.CENTER, pady=(0, 8))
 
         rows = [
             (_ICON_KILLED, "Killed {}".format(stats["killed"]), UI_COLORS["accent"]),
@@ -631,11 +654,11 @@ class GameViewer:
                 font=("Arial", 15),
                 bg=UI_COLORS["panel"],
                 fg=color,
-            ).pack(anchor=tk.W, pady=2)
+            ).pack(anchor=tk.CENTER, pady=2)
 
     @staticmethod
     def _get_photo(
-        img_path: str, max_w: int, max_h: int, blur_radius: float = 0.0
+        img_path: str, max_w: int, max_h: int, blur_radius: float = 0.0, grayscale: bool = True
     ) -> Any:
         """Load, resize, and return a Tkinter-compatible photo image.
 
@@ -664,7 +687,10 @@ class GameViewer:
             new_w = int(orig_w * scale)
             new_h = int(orig_h * scale)
 
-            resized = img.resize((new_w, new_h), Image.LANCZOS)
+            resized = img.resize((new_w, new_h), Image.BILINEAR)
+            if grayscale and blur_radius > 0:
+                resized = resized.convert("L")
+
             if blur_radius > 0:
                 resized = resized.filter(ImageFilter.GaussianBlur(blur_radius))
             tk_img = ImageTk.PhotoImage(resized)
