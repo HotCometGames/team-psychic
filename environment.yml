@@ -14,7 +14,9 @@ dependencies:
   - torchvision
   - gymnasium
   - timm
-  - pip
+  - pip:
+    - gpsread
+    - gspread-dataframe
   - debugpy
   - matplotlib
   - pytest
