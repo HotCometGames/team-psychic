@@ -274,4 +274,4 @@ class HordeMeter:
         )
 
         gap = self._ambulance_distance - self._zombie_distance
-        self._gap_label.config( text=f">DISTANCE FROM HORDER: {gap:.0f} FT")
+        self._gap_label.config( text=f">DISTANCE FROM HORDE: {gap:.0f} FT")

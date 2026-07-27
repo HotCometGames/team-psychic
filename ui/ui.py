@@ -433,8 +433,8 @@ class UI:
            self.root,
             w,
             h,
-            max_distance=100,
-            initial_distance=20,
+            max_distance=HORDE_MAX_DISTANCE,
+            initial_distance=HORDE_INITIAL_DISTANCE,
             zombie_icon_path="ui/graphics/zombie.png",
             ambulance_icon_path="ui/graphics/ambulance.png",
         )
