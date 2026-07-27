@@ -476,7 +476,7 @@ class UI:
             self._info_label = tk.Label(
                 self._info_container,
                 text="",
-                font=("Courier New", 14, "bold"),
+                font=("Courier New", 12, "bold"),
                 fg="#55ff55",
                 bg="#051405",
                 justify=tk.LEFT,
