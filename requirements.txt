@@ -13,3 +13,5 @@ debugpy
 matplotlib
 pytest
 pytest-cov
+gspread
+gspread-dataframe

@@ -19,3 +19,6 @@ dependencies:
   - matplotlib
   - pytest
   - pytest-cov
+  - pip:
+    - gspread
+    - gspread-dataframe
