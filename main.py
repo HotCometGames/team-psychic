@@ -180,7 +180,7 @@ class Main:
             mode, self.data_dir
         )
 
-        UI(
+        ui_app = UI(
             data_parser,
             scorekeeper,
             self.data_dir,
@@ -195,6 +195,14 @@ class Main:
             ai_starts_round=IMAGE_BLUR_START_ROUND if mode == "human" else None,
         )
 
+        # Trigger save and sync after the UI finishes / window closes
+        if log:
+            print("Game finished. Saving logs and syncing to Google Sheets...")
+            scorekeeper.get_score()  # Scrams remaining passengers & finalizes score
+            scorekeeper.save_log(
+                sync_gsheets=True,
+                spreadsheet_name="Ambulance Game Logs"
+            )
     def _run_auto(
         self,
         data_parser: DataParser,
@@ -250,7 +258,10 @@ class Main:
 
         score = scorekeeper.get_score()  # scrams remaining passengers, finalizes score
         if log:
-            scorekeeper.save_log()
+            scorekeeper.save_log(
+                sync_gsheets=True,
+                spreadsheet_name="Ambulance Game Logs"
+            )
         print("RL equiv reward:", scorekeeper.get_cumulative_reward())
         print(score)
         return score

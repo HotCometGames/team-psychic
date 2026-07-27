@@ -260,11 +260,13 @@ class UI:
             def _on_skip() -> None:
                 self.button_menu.disable_all()
                 scorekeeper.log_turn(
-                    self.humanoid,
+                    self.humanoids,
                     "skip",
-                    **self._get_log_context(scorekeeper),
+                    **self._get_log_context(scorekeeper, target_humanoids=self.humanoids),
                 )
-                scorekeeper.skip(self.humanoid)
+                for h in self.humanoids:
+                    scorekeeper.skip(h)
+
                 self.horde_meter.advance(
                     zombie_delta=HordeDistance.ZOMBIE.value,
                     ambulance_delta=HordeDistance.SKIP.value + self.engineer_bonus_ft,
@@ -287,45 +289,34 @@ class UI:
                         self.humanoid = selected_humanoid
 
                         scorekeeper.log_turn(
-                            selected_humanoid,
+                            self.humanoids,
                             "squish",
-                            **self._get_log_context(scorekeeper),
+                            **self._get_log_context(scorekeeper, target_humanoids=self.humanoids),
                         )
                         scorekeeper.squish(selected_humanoid)
 
                         # Log any unchosen image(s) as skipped
                         for idx, h in enumerate(self.humanoids):
                             if idx != chosen_index:
-                                self.humanoid = h
-                                scorekeeper.log_turn(
-                                    h,
-                                    "skip",
-                                    **self._get_log_context(scorekeeper),
-                                )
                                 scorekeeper.skip(h)
 
                         self.horde_meter.advance(
                             zombie_delta=HordeDistance.ZOMBIE.value,
-                            ambulance_delta=HordeDistance.SQUISH.value
-                            + self.engineer_bonus_ft,
+                            ambulance_delta=HordeDistance.SQUISH.value + self.engineer_bonus_ft,
                         )
 
-                        # Clear the selection listener callback so it doesn't fire unexpectedly later
-                        self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
-
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
                             self.button_menu.enable_all()
                         self.get_next(data_fp, data_parser, scorekeeper)
 
-                    # Inject our selection handler closure into the game viewer
                     self.game_viewer.on_image_selected = handle_choice
                 else:
                     scorekeeper.log_turn(
-                        self.humanoid,
+                        self.humanoids,
                         "squish",
-                        **self._get_log_context(scorekeeper),
+                        **self._get_log_context(scorekeeper, target_humanoids=self.humanoids),
                     )
                     scorekeeper.squish(self.humanoid)
                     self.horde_meter.advance(
@@ -350,9 +341,9 @@ class UI:
                         self.humanoid = selected_humanoid
 
                         scorekeeper.log_turn(
-                            selected_humanoid,
+                            self.humanoids,
                             "save",
-                            **self._get_log_context(scorekeeper),
+                            **self._get_log_context(scorekeeper, target_humanoids=self.humanoids),
                         )
                         scorekeeper.save(selected_humanoid)
                         self.saved_passengers.append(selected_humanoid)
@@ -360,12 +351,6 @@ class UI:
                         # Log any unchosen image(s) as skipped
                         for idx, h in enumerate(self.humanoids):
                             if idx != chosen_index:
-                                self.humanoid = h
-                                scorekeeper.log_turn(
-                                    h,
-                                    "skip",
-                                    **self._get_log_context(scorekeeper),
-                                )
                                 scorekeeper.skip(h)
 
                         self.horde_meter.advance(
@@ -378,21 +363,18 @@ class UI:
                         self._apply_engineer_bonus(selected_humanoid)
 
                         # Clear the selection listener callback so it doesn't fire unexpectedly later
-                        self.humanoid = selected_humanoid
                         self.game_viewer.on_image_selected = None
-
                         self.update_ui(scorekeeper)
                         if hasattr(self.button_menu, 'enable_all'):
                             self.button_menu.enable_all()
                         self.get_next(data_fp, data_parser, scorekeeper)
 
-                    # Inject our selection handler closure into the game viewer
                     self.game_viewer.on_image_selected = handle_choice
                 else:
                     scorekeeper.log_turn(
-                        self.humanoid,
+                        self.humanoids,
                         "save",
-                        **self._get_log_context(scorekeeper),
+                        **self._get_log_context(scorekeeper, target_humanoids=self.humanoids),
                     )
                     scorekeeper.save(self.humanoid)
                     self.saved_passengers.append(self.humanoid)
@@ -510,11 +492,11 @@ class UI:
             # when the player closes the window after a game that already called
             # save_log() at game-end. Also catches mid-game window closes where
             # the current episode was never committed.
-            if self.log and (
-                scorekeeper.logger
-                or scorekeeper._all_logs_written < len(scorekeeper.all_logs)
-            ):
-                scorekeeper.save_log()
+            # if self.log and (
+            #     scorekeeper.logger
+            #     or scorekeeper._all_logs_written < len(scorekeeper.all_logs)
+            # ):
+            #     scorekeeper.save_log()
             self.root.destroy()
 
         self.root.protocol("WM_DELETE_WINDOW", _on_close)
@@ -556,7 +538,7 @@ class UI:
                 "Attempted to advance machine turn but recommender is None — cannot compute action for the humanoid. Pass a recommender to enable machine play."
             )
         probs = self.classifier.classify(self.humanoid)
-        action = self.recommender.recommend(self.humanoid, probs, scorekeeper)
+        action = self.recommender.recommend(self.humanoids, probs, scorekeeper)
         predicted_class = int(np.argmax(probs))
         max_prob = float(np.max(probs))
         confidence = (
@@ -567,7 +549,7 @@ class UI:
         action_executed = scorekeeper.map_do_action(action, self.humanoid)
         if action_executed:
             scorekeeper.log_turn(
-                self.humanoid,
+                self.humanoids,
                 action.value,
                 predicted_class=predicted_class,
                 recommended_action=action.value,
@@ -650,7 +632,7 @@ class UI:
         """
         return self._ai_starts_round is None or self.round_num >= self._ai_starts_round
 
-    def _get_log_context(self, scorekeeper: ScoreKeeper, target_humanoid: Humanoid | None = None) -> dict:
+    def _get_log_context(self, scorekeeper: ScoreKeeper, target_humanoids: Humanoid | None = None) -> dict:
         """Return keyword args for ``scorekeeper.log_turn()`` with classifier context.
 
         Reads from ``self._last_probs`` (cached by ``_update_info_display``) to
@@ -668,41 +650,42 @@ class UI:
             decision was made, before this turn's ``horde_meter.advance()``
             call moves them.
         """
-        h = target_humanoid if target_humanoid is not None else self.humanoid
 
-        predicted_class = None
-        recommended_action = None
-        confidence = None
+        humanoids_to_log = target_humanoids if target_humanoids is not None else getattr(self, "humanoids", [self.humanoid])
+        humanoids_to_log = [item for item in humanoids_to_log if item is not None]
 
-        probs = None # use cached output from _update_info_display
-        if probs is None and self.classifier is not None:
-            probs = self.classifier.classify(h)
+        predicted_classes = []
+        predicted_roles = []
+        confidences = []
 
-        if probs is not None:
-            predicted_class = int(np.argmax(probs))
-            max_prob = float(np.max(probs))
-            confidence = (
-                "high"
-                if max_prob >= CNN_CONFIDENCE_HIGH
-                else "mid" if max_prob >= CNN_CONFIDENCE_MID else "low"
-            )
-        if self.recommender is not None and probs is not None:
-            # Use cached action from _update_info_display — avoids a second recommend()
-            # call that could return a different result for stochastic recommenders.
-            action = self.recommender.recommend(h, probs, scorekeeper)
-            if action == ActionState.SCRAM:
-                # No Scram button in human play — log the actionable
-                # equivalent, not an option the player could never take.
-                action = self._scram_fallback(probs)
-            recommended_action = action.value
+        if self.classifier is not None:
+            for h in humanoids_to_log:
+                probs = self.classifier.classify(h)
+                if probs is not None:
+                    predicted_classes.append(int(np.argmax(probs)))
+                    confidences.append(float(np.max(probs)))
+
+                    # Fetch predicted role if supported
+                    if hasattr(self.classifier, "classify_role"):
+                        role_probs = self.classifier.classify_role(h, state_probs=probs)
+                        predicted_roles.append(int(np.argmax(role_probs)) if role_probs is not None else None)
+                    else:
+                        predicted_roles.append(None)
+
+        is_split_screen = len(humanoids_to_log) > 1
+
 
         return {
-            "predicted_class": predicted_class,
-            "recommended_action": recommended_action,
-            "confidence": confidence,
+            "predicted_class": predicted_classes,
+            "predicted_role": predicted_roles,
+            "recommended_action": self._last_recommended_action,
+            "confidence": confidences,
             "obs": None,
             "zombie_distance": self.horde_meter.zombie_distance,
             "ambulance_distance": self.horde_meter.ambulance_distance,
+            "is_split_screen": is_split_screen,
+            "people_in_view": len(humanoids_to_log),
+            "image_blurred": self._should_blur_images(),
         }
 
     def update_ui(self, scorekeeper: ScoreKeeper) -> None:
@@ -819,8 +802,8 @@ class UI:
             # full shift length, which would fool disable_buttons() into re-enabling them.
             self.button_menu.disable_all()
             if self.log:
-                scorekeeper.reset()  # commit episode to all_logs before writing
                 scorekeeper.save_log()
+            scorekeeper.reset()  # commit episode to all_logs before writing
 
             # No more rounds left in this run — omit the continue button so
             # display_score() shows a run-complete screen with a restart
