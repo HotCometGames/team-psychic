@@ -1,7 +1,7 @@
 import math
 import tkinter as tk
 from collections.abc import Callable
-from os.path import join
+from os.path import abspath, dirname, join
 from typing import Any
 from PIL import ImageTk, Image, ImageFilter
 
@@ -66,6 +66,17 @@ class GameViewer:
         self.canvas.place(x=300, y=100)
         self.canvas.update()
 
+        try:
+            canvas_w = self.canvas.winfo_width()
+            canvas_h = self.canvas.winfo_height()
+            frame_path = join(dirname(abspath(__file__)), "graphics", "frame.png")
+            frame_raw = Image.open(frame_path).convert("RGBA")
+            # Resize frame to fill the canvas bounds exactly
+            self.frame_photo = ImageTk.PhotoImage(frame_raw.resize((canvas_w, canvas_h), Image.LANCZOS))
+        except FileNotFoundError:
+            self.frame_photo = None
+            print("frame.png not found in ui/graphics/")
+
         self.photo = None
         self.current_paths = []
         self.on_image_selected = None
@@ -88,6 +99,8 @@ class GameViewer:
         self.canvas.delete("photo")
         self.photos = []
 
+   
+    
     def create_photos(self, file_paths: list[str], blur: bool = False) -> None:
         """Load a list of images from disk and display them side-by-side.
 
@@ -103,6 +116,7 @@ class GameViewer:
         """
         self.canvas.delete("photo")
         self.canvas.delete("indicator")
+        self.canvas.delete("frame")
 
         # Re-arm mouse listeners for new choices
         self.canvas.bind("<Motion>", self._on_canvas_hover)
@@ -120,26 +134,31 @@ class GameViewer:
         canvas_h = self.canvas.winfo_height()
         target_w = math.floor(canvas_w / num_images)
 
-        target_w = math.floor(canvas_w / num_images)
 
         blur_radius = IMAGE_BLUR_RADIUS if blur else 0.0
         for i, fp in enumerate(file_paths):
-            # Calculate the horizontal offset for each image
-            x_offset = i * target_w
-
-            # Load and resize image to fit its fractional slice
+            
             photo = self._get_photo(fp, target_w, canvas_h, blur_radius=blur_radius)
             self.photos.append(photo)
 
-            img_h = photo.height()
-            y_offset = max(0, math.floor((canvas_h - img_h) / 2))
+            # Center the photo within its slice (X) and canvas height (Y)
+            x_center = i * target_w + (target_w // 2)
+            y_center = canvas_h // 2
 
-            # Place onto the canvas canvas
+            # Place onto the canvas
             self.canvas.create_image(
-                x_offset, y_offset,
-                anchor=tk.NW,
+                x_center, y_center,
+                anchor=tk.CENTER,  # Changed from NW to CENTER
                 image=photo,
                 tags=("photo", f"idx_{i}")
+            )
+
+        if hasattr(self, "frame_photo") and self.frame_photo:
+            self.canvas.create_image(
+                canvas_w // 2, canvas_h // 2,
+                image=self.frame_photo,
+                anchor=tk.CENTER,
+                tags="frame"
             )
 
     def create_photo(self, fp: str, blur: bool = False) -> None:
@@ -664,7 +683,7 @@ class GameViewer:
             new_w = int(orig_w * scale)
             new_h = int(orig_h * scale)
 
-            resized = img.resize((new_w, new_h), Image.LANCZOS)
+            resized = img.resize((new_w, new_h), Image.BILINEAR)
             if blur_radius > 0:
                 resized = resized.filter(ImageFilter.GaussianBlur(blur_radius))
             tk_img = ImageTk.PhotoImage(resized)

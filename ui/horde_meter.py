@@ -17,7 +17,10 @@ Usage (inside ui/ui.py, alongside your other widget construction):
 """
 
 import math
+import os
 import tkinter as tk
+from typing import Optional
+from PIL import Image, ImageTk
 
 from gameplay.constants import UI_COLORS
 
@@ -49,6 +52,8 @@ class HordeMeter:
         h: int,
         max_distance: float = 100.0,
         initial_distance: float = 10.0,
+        zombie_icon_path: str = "ui/graphics/zombie.png",
+        ambulance_icon_path: str = "ui/graphics/ambulance.png",
     ) -> None:
         """Build the meter and place it near the bottom of the window.
 
@@ -70,7 +75,7 @@ class HordeMeter:
         self._bar_x1 = math.floor(0.92 * w)
         self._bar_y = math.floor(0.95 * h)
         self._bar_height = 18
-        self._icon_size = 40
+        self._icon_size = 52
         self._canvas_height = self._icon_size + 40
 
         # Canvas coordinates are LOCAL to the canvas, not window-global. The
@@ -84,14 +89,18 @@ class HordeMeter:
             root,
             width=w,
             height=self._canvas_height,
-            bg=root["bg"],
+            bg=UI_COLORS["panel"],
             highlightthickness=0,
+            bd=0,
         )
         self.canvas.place(x=0, y=self._bar_y - self._bar_y_local)
 
         # Positions along the bar, in feet from the bar's 0-ft end. The
         # horde always starts at 0; the ambulance starts initial_distance
         # feet ahead of it. Both move independently via advance().
+        self._zombie_img: Optional[ImageTk.PhotoImage] = self._load_icon(zombie_icon_path, self._icon_size)
+        self._ambulance_img: Optional[ImageTk.PhotoImage] = self._load_icon(ambulance_icon_path, self._icon_size)
+        
         self._zombie_distance = 0.0
         self._ambulance_distance = initial_distance
 
@@ -109,8 +118,8 @@ class HordeMeter:
         self._gap_label = tk.Label(
             root,
             text="",
-            font=("Arial", 11),
-            bg=root["bg"],
+            font=("Courier New", 16, "bold"),
+            bg=UI_COLORS["panel"],
             fg=UI_COLORS["fg"],
             justify=tk.LEFT,
             anchor="w",
@@ -125,6 +134,13 @@ class HordeMeter:
     # ------------------------------------------------------------------
     # Setup helpers
     # ------------------------------------------------------------------
+    def _load_icon(self, path: str, size: int) -> Optional[ImageTk.PhotoImage]:
+        """Helper to resize and convert sprite images for the canvas."""
+        if os.path.exists(path):
+            with Image.open(path) as img:
+                resized = img.resize((size, size), Image.LANCZOS)
+                return ImageTk.PhotoImage(resized)
+        return None
 
     def _draw_static_bar(self) -> None:
         """Draw the background bar and the fixed end labels."""
@@ -135,28 +151,23 @@ class HordeMeter:
             y0,
             self._bar_x1,
             y1,
-            fill="#e0e0e0",
-            outline="#888888",
-            width=1,
+            fill=UI_COLORS["slot_bg"],
+            outline=UI_COLORS["card_border"],
+            width=2,
         )
         # fill= is load-bearing here — Tk's text-item default color is black,
         # which is invisible against this app's near-black background.
-        self.canvas.create_text(
-            self._bar_x0,
-            self._bar_y_local - self._icon_size // 2 - 14,
-            text="Horde",
-            font=("Arial", 10),
-            fill=UI_COLORS["fg"],
-        )
+   
         self.canvas.create_text(
             self._bar_x1,
             self._bar_y_local - self._icon_size // 2 - 14,
-            text="Camp",
-            font=("Arial", 10),
+            text="[ BASE CAMP ]",
+            font=("Courier New", 10, "bold"),
             fill=UI_COLORS["fg"],
+            anchor="e",
         )
 
-    def _draw_icon_at(self, x: int, y: int, color: str, tag: str) -> int:
+    def _draw_icon_at(self, x: int, y: int, photo_img: Optional[ImageTk.PhotoImage], fallback_color: str, tag: str) -> int:
         """Draw a colored circle icon at (x, y).
 
         Args:
@@ -168,11 +179,13 @@ class HordeMeter:
         Returns:
             The canvas item id created.
         """
+        if photo_img:
+            return self.canvas.create_image(x, y, image=photo_img, tags=(tag,))
+        
         r = self._icon_size // 2
-        return self.canvas.create_oval(
-            x - r, y - r, x + r, y + r, fill=color, outline="", tags=(tag,)
+        return self.canvas.create_rectangle(
+            x - r, y - r, x + r, y + r, fill=fallback_color, outline=UI_COLORS["card_border"], width=2, tags=(tag,)
         )
-
     def _distance_to_x(self, distance: float) -> float:
         """Convert a feet-from-0 distance to a canvas x-coordinate on the bar.
 
@@ -237,12 +250,11 @@ class HordeMeter:
         self._redraw()
 
     def _redraw(self) -> None:
-        """Redraw the zombie icon, the ambulance icon + label, and the side gap label."""
         if self._zombie_icon_id is not None:
             self.canvas.delete(self._zombie_icon_id)
         zx = self._distance_to_x(self._zombie_distance)
         self._zombie_icon_id = self._draw_icon_at(
-            zx, self._bar_y_local, "#4a7a3a", tag="zombie"
+            zx, self._bar_y_local, self._zombie_img, fallback_color="#331111", tag="zombie"
         )
 
         if self._ambulance_icon_id is not None:
@@ -251,17 +263,15 @@ class HordeMeter:
             self.canvas.delete(self._ambulance_label_id)
         ax = self._distance_to_x(self._ambulance_distance)
         self._ambulance_icon_id = self._draw_icon_at(
-            ax, self._bar_y_local, "#d94f4f", tag="ambulance"
+            ax, self._bar_y_local, self._ambulance_img, fallback_color="#113311", tag="ambulance"
         )
         self._ambulance_label_id = self.canvas.create_text(
             ax,
             self._bar_y_local - self._icon_size // 2 - 10,
-            text=f"{max(0.0, min(self.max_distance, self._ambulance_distance)):.0f} ft",
-            font=("Arial", 11, "bold"),
+            text=f"{max(0.0, min(self.max_distance, self._ambulance_distance)):.0f} FT",
+            font=("Courier New", 14, "bold"),
             fill=UI_COLORS["fg"],
         )
 
         gap = self._ambulance_distance - self._zombie_distance
-        self._gap_label.config(
-            text=f"Distance between zombies and ambulance: {gap:.0f} ft"
-        )
+        self._gap_label.config( text=f">DISTANCE FROM HORDER: {gap:.0f} FT")
